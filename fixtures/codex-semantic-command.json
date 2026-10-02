@@ -1,0 +1,12 @@
+[
+  "codex", "exec",
+  "--ignore-user-config", "--ephemeral", "--skip-git-repo-check",
+  "--sandbox", "read-only",
+  "--model", "{model}",
+  "-c", "model_reasoning_effort=\"medium\"",
+  "-c", "approval_policy=\"never\"",
+  "-c", "features.shell_tool=false",
+  "-c", "features.multi_agent=false",
+  "-c", "web_search=\"disabled\"",
+  "--color", "never", "-"
+]

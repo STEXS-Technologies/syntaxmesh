@@ -1,0 +1,15 @@
+[package]
+name = "syntaxmesh-extension-ipc"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Bounded external-producer fact framing adapter"
+
+[dependencies]
+serde_json.workspace = true
+syntaxmesh-extension-sdk = { path = "../syntaxmesh-extension-sdk" }
+
+[lints]
+workspace = true

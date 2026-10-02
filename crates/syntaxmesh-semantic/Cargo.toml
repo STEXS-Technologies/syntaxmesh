@@ -1,0 +1,17 @@
+[package]
+name = "syntaxmesh-semantic"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Provider-neutral, source-grounded semantic graph facts"
+
+[dependencies]
+blake3.workspace = true
+serde.workspace = true
+syntaxmesh-core.workspace = true
+syntaxmesh-extension-sdk.workspace = true
+
+[lints]
+workspace = true

@@ -1,0 +1,205 @@
+[config]
+default_to_workspace = false
+
+[tasks.format]
+description = "Format all Rust crates"
+workspace = false
+command = "cargo"
+args = ["fmt", "--all"]
+dependencies = ["format-out-of-tree-extension", "format-turso-fts-probe", "format-fuzz"]
+
+[tasks.format-check]
+description = "Verify Rust formatting"
+workspace = false
+command = "cargo"
+args = ["fmt", "--all", "--check"]
+dependencies = ["format-check-out-of-tree-extension", "format-check-turso-fts-probe", "format-check-fuzz"]
+
+[tasks.format-out-of-tree-extension]
+description = "Format the excluded out-of-tree extension consumer"
+workspace = false
+command = "cargo"
+args = ["fmt", "--manifest-path", "fixtures/out-of-tree-extension/Cargo.toml"]
+
+[tasks.format-check-out-of-tree-extension]
+description = "Check formatting of the excluded out-of-tree extension consumer"
+workspace = false
+command = "cargo"
+args = ["fmt", "--manifest-path", "fixtures/out-of-tree-extension/Cargo.toml", "--check"]
+
+[tasks.format-turso-fts-probe]
+description = "Format the excluded Turso FTS capability probe"
+workspace = false
+command = "cargo"
+args = ["fmt", "--manifest-path", "fixtures/turso-fts-probe/Cargo.toml"]
+
+[tasks.format-check-turso-fts-probe]
+description = "Check formatting of the excluded Turso FTS capability probe"
+workspace = false
+command = "cargo"
+args = ["fmt", "--manifest-path", "fixtures/turso-fts-probe/Cargo.toml", "--check"]
+
+[tasks.format-fuzz]
+description = "Format the isolated source extractor fuzz target"
+workspace = false
+command = "cargo"
+args = ["fmt", "--manifest-path", "crates/fuzz/Cargo.toml"]
+
+[tasks.format-check-fuzz]
+description = "Check formatting of the isolated source extractor fuzz target"
+workspace = false
+command = "cargo"
+args = ["fmt", "--manifest-path", "crates/fuzz/Cargo.toml", "--check"]
+
+[tasks.check]
+description = "Check all targets and features"
+workspace = false
+command = "cargo"
+args = ["check", "--workspace", "--all-targets", "--all-features", "--locked", "${@}"]
+
+[tasks.build]
+description = "Build the SyntaxMesh workspace"
+workspace = false
+command = "cargo"
+args = ["build", "--workspace", "--all-features", "--locked", "${@}"]
+
+[tasks.check-store-instrumentation]
+description = "Check store instrumentation with adapter/query instrumentation disabled"
+workspace = false
+command = "cargo"
+args = ["check", "--workspace", "--all-targets", "--locked", "--features", "syntaxmesh-store/benchmark-instrumentation"]
+
+[tasks.check-query-instrumentation]
+description = "Check query instrumentation with adapter instrumentation disabled"
+workspace = false
+command = "cargo"
+args = ["check", "--workspace", "--all-targets", "--locked", "--features", "syntaxmesh-query/benchmark-instrumentation"]
+
+[tasks.check-mixed-instrumentation]
+description = "Check downstream-style instrumentation feature unification"
+workspace = false
+dependencies = ["check-store-instrumentation", "check-query-instrumentation"]
+
+[tasks.clippy]
+description = "Run the Shardline-derived strict Clippy policy"
+workspace = false
+command = "cargo"
+args = ["clippy", "--workspace", "--all-targets", "--all-features", "--locked", "--", "-D", "warnings", "${@}"]
+
+[tasks.audit]
+description = "Audit locked dependencies for known security advisories"
+workspace = false
+install_crate = "cargo-audit"
+command = "cargo"
+args = ["audit", "${@}"]
+
+[tasks.deny]
+description = "Check dependency licenses, sources, and RustSec advisories"
+workspace = false
+install_crate = "cargo-deny"
+command = "cargo"
+args = ["deny", "check", "${@}"]
+
+[tasks.architecture]
+description = "Check pure crate dependency boundaries and required engine integrations"
+workspace = false
+command = "cargo"
+args = ["run", "--quiet", "-p", "syntaxmesh-xtask", "--", "architecture"]
+
+[tasks.extension-fixture]
+description = "Build and run the excluded out-of-tree extension consumer"
+workspace = false
+command = "cargo"
+args = ["run", "--quiet", "-p", "syntaxmesh-xtask", "--", "extension-fixture"]
+
+[tasks.turso-fts-probe]
+description = "Probe token-search behavior of the pinned Turso embedded FTS feature"
+workspace = false
+command = "cargo"
+args = ["run", "--quiet", "-p", "syntaxmesh-xtask", "--", "turso-fts-probe"]
+
+[tasks.sqlite-migrations]
+description = "Verify SQLite SQL migrations and Rust registry stay synchronized"
+workspace = false
+command = "cargo"
+args = ["run", "--quiet", "-p", "syntaxmesh-xtask", "--", "sqlite-migrations"]
+
+[tasks.turso-migrations]
+description = "Verify Turso SQL migrations and Rust registry stay synchronized"
+workspace = false
+command = "cargo"
+args = ["run", "--quiet", "-p", "syntaxmesh-xtask", "--", "turso-migrations"]
+
+[tasks.test]
+description = "Run workspace tests without external services"
+workspace = false
+command = "cargo"
+args = ["test", "--workspace", "--all-features", "--locked", "${@}"]
+
+[tasks.docs]
+description = "Build public API documentation with broken links rejected"
+workspace = false
+command = "cargo"
+args = ["doc", "--workspace", "--no-deps", "--all-features", "--locked", "${@}"]
+env = { RUSTDOCFLAGS = "-D rustdoc::broken_intra_doc_links" }
+
+[tasks.benchmark-temporal]
+description = "Measure temporal query depth/output costs and publication scaling by graph/change size"
+workspace = false
+command = "cargo"
+args = ["bench", "-p", "syntaxmesh-store-turso", "--bench", "temporal_depth", "--features", "benchmark-instrumentation", "--locked", "${@}"]
+env = { TMPDIR = "${CARGO_MAKE_WORKSPACE_WORKING_DIRECTORY}/target/benchmark-scratch" }
+
+[tasks.benchmark-repository]
+description = "Measure real Rust-repository scan, initial indexing, and one-file incremental indexing across stores"
+workspace = false
+command = "cargo"
+args = ["bench", "-p", "syntaxmesh-store-turso", "--bench", "repository_indexing", "--features", "benchmark-instrumentation", "--locked", "${@}"]
+
+[tasks.benchmark-repository-evidence]
+description = "Capture repeated repository benchmark samples with Shardline-style provenance and raw logs"
+workspace = false
+command = "cargo"
+args = ["run", "--quiet", "-p", "syntaxmesh-xtask", "--", "benchmark-repository-evidence", "${@}"]
+
+[tasks.benchmark-context-retrieval]
+description = "Capture repeated context retrieval evidence with Shardline-style provenance and raw logs"
+workspace = false
+command = "cargo"
+args = ["run", "--quiet", "-p", "syntaxmesh-xtask", "--", "benchmark-context-retrieval", "${@}"]
+
+[tasks.evaluate-semantic-provider]
+description = "Opt-in initial, cached, sparse-edit and edited-cache semantic evaluation; requires an explicit endpoint or harness command"
+env = { SYNTAXMESH_SEMANTIC_EVAL_WORKING_DIRECTORY = "${CARGO_MAKE_WORKSPACE_WORKING_DIRECTORY}" }
+workspace = false
+command = "cargo"
+args = ["test", "-p", "syntaxmesh-cli", "--test", "semantic_quality", "--locked", "--", "--ignored", "--nocapture"]
+
+[tasks.benchmark-file-writes]
+description = "Trace Linux database-file write syscalls per benchmark stage (not physical device I/O)"
+workspace = false
+command = "cargo"
+args = ["run", "--quiet", "-p", "syntaxmesh-xtask", "--", "benchmark-file-writes"]
+
+[tasks.fuzz-source-smoke]
+description = "Run a bounded nightly libFuzzer smoke campaign over source extractors (requires cargo-fuzz)"
+workspace = false
+command = "cargo"
+args = ["run", "--quiet", "-p", "syntaxmesh-xtask", "--", "fuzz-source-extractors"]
+
+[tasks.ci]
+description = "Run the v0 contributor checks"
+workspace = false
+dependencies = ["format-check", "architecture", "extension-fixture", "sqlite-migrations", "turso-migrations", "check-mixed-instrumentation", "check", "clippy", "audit", "deny", "test", "docs"]
+
+[tasks.test-overflow]
+description = "Run workspace tests with integer overflow checks enabled"
+workspace = false
+command = "cargo"
+args = ["test", "--workspace", "--all-features", "--locked", "${@}"]
+env = { RUSTFLAGS = "-C overflow-checks=on" }
+
+[tasks.ci-overflow]
+description = "Run standard CI plus the overflow-checked test lane"
+workspace = false
+dependencies = ["ci", "test-overflow"]

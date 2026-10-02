@@ -1,0 +1,45 @@
+[package]
+name = "syntaxmesh-mcp"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Read-only MCP host for SyntaxMesh graph queries"
+
+[features]
+benchmark-instrumentation = ["syntaxmesh-query/benchmark-instrumentation", "syntaxmesh-store-turso/benchmark-instrumentation"]
+
+[[bin]]
+name = "syntaxmesh-mcp"
+path = "src/main.rs"
+
+[dependencies]
+hex.workspace = true
+rmcp.workspace = true
+schemars.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+syntaxmesh-api-model.workspace = true
+syntaxmesh-core.workspace = true
+syntaxmesh-context-host.workspace = true
+syntaxmesh-engine.workspace = true
+syntaxmesh-lang-rust.workspace = true
+syntaxmesh-language-sdk.workspace = true
+syntaxmesh-query.workspace = true
+syntaxmesh-store-turso.workspace = true
+tokio.workspace = true
+
+[dev-dependencies]
+rust-stemmers = "=1.2.0"
+blake3.workspace = true
+syntaxmesh-lang-bash.workspace = true
+syntaxmesh-lang-docs.workspace = true
+syntaxmesh-lang-ecmascript.workspace = true
+syntaxmesh-lang-python.workspace = true
+syntaxmesh-scanner.workspace = true
+syntaxmesh-source-host = { path = "../syntaxmesh-source-host" }
+tempfile.workspace = true
+
+[lints]
+workspace = true

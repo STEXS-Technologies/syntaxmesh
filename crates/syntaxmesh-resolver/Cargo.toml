@@ -1,0 +1,15 @@
+[package]
+name = "syntaxmesh-resolver"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Deterministic, runtime-neutral reference resolution for SyntaxMesh"
+
+[dependencies]
+syntaxmesh-core.workspace = true
+syntaxmesh-language-sdk.workspace = true
+
+[lints]
+workspace = true

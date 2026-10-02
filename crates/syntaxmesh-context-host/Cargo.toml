@@ -1,0 +1,18 @@
+[package]
+name = "syntaxmesh-context-host"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Shared concrete source and tokenizer adapters for SyntaxMesh hosts"
+
+[dependencies]
+serde_json.workspace = true
+syntaxmesh-api-model.workspace = true
+syntaxmesh-core.workspace = true
+syntaxmesh-query.workspace = true
+tiktoken-rs = "=0.12.1"
+
+[lints]
+workspace = true

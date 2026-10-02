@@ -1,0 +1,10 @@
+target/
+/crates/fuzz/artifacts/
+/crates/fuzz/coverage/
+/.syntaxmesh/
+/.graphify_cache/
+/graphify-out/
+__pycache__/
+*.db
+*.db-wal
+*.db-shm

@@ -1,0 +1,11 @@
+[package]
+name = "syntaxmesh-watch"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Runtime-independent bounded watch scheduling for SyntaxMesh hosts"
+
+[lints]
+workspace = true

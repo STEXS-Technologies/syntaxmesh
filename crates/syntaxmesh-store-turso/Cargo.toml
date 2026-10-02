@@ -1,0 +1,51 @@
+[package]
+name = "syntaxmesh-store-turso"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Turso-backed SyntaxMesh graph store adapter"
+
+[features]
+benchmark-instrumentation = [
+    "syntaxmesh-store/benchmark-instrumentation",
+    "syntaxmesh-store-sqlite/benchmark-instrumentation",
+    "syntaxmesh-integration-penelope/benchmark-instrumentation",
+    "syntaxmesh-query/benchmark-instrumentation",
+]
+
+[dependencies]
+blake3.workspace = true
+bincode.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+syntaxmesh-core.workspace = true
+syntaxmesh-store.workspace = true
+tokio = { version = "1", features = ["rt", "time"] }
+turso = { version = "0.8.0-pre.13", default-features = false }
+
+[dev-dependencies]
+syntaxmesh-api-model.workspace = true
+syntaxmesh-analytics-parquet.workspace = true
+syntaxmesh-engine.workspace = true
+syntaxmesh-indexer.workspace = true
+syntaxmesh-integration-penelope.workspace = true
+syntaxmesh-lang-rust.workspace = true
+syntaxmesh-language-sdk.workspace = true
+syntaxmesh-scanner.workspace = true
+syntaxmesh-query.workspace = true
+syntaxmesh-store-sqlite.workspace = true
+tempfile.workspace = true
+syntaxmesh-workflow.workspace = true
+
+[[bench]]
+name = "temporal_depth"
+harness = false
+required-features = ["benchmark-instrumentation"]
+
+[[bench]]
+name = "repository_indexing"
+harness = false
+
+[lints]
+workspace = true

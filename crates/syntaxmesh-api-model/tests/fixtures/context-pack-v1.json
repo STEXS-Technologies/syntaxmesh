@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "query": "why Penelope",
+  "repository": [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],
+  "worktree": [2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2],
+  "generation": [3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3],
+  "tokenizer": "fixture-tokenizer-v1",
+  "token_budget": 8192,
+  "token_count": 1024,
+  "items": [{
+    "rank": 1,
+    "kind": "signature",
+    "text": "Penelope (External)",
+    "node_ids": [[4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4]],
+    "edge_ids": [],
+    "source_path": null,
+    "line_start": null,
+    "line_end": null
+  }],
+  "warnings": [],
+  "omitted": {"source_evidence":0,"signatures":0,"graph_paths":0,"summaries":0}
+}

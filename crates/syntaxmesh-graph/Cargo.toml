@@ -1,0 +1,15 @@
+[package]
+name = "syntaxmesh-graph"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Generation-tagged adjacency projection for SyntaxMesh"
+
+[dependencies]
+petgraph.workspace = true
+syntaxmesh-core.workspace = true
+syntaxmesh-store.workspace = true
+
+[lints]
+workspace = true

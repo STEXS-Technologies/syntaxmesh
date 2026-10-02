@@ -1,0 +1,2 @@
+6main() { printf '%s\\n' syntaxmesh; }
+main

@@ -1,0 +1,36 @@
+{
+  "schema_version": 2,
+  "query": "why Penelope",
+  "repository": [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],
+  "worktree": [2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2],
+  "generation": [3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3],
+  "tokenizer": "fixture-tokenizer-v1",
+  "token_budget": 8192,
+  "token_count": 1024,
+  "items": [
+    {
+      "rank": 1,
+      "evidence_class": "SourceFact",
+      "kind": "source_evidence",
+      "text": "Use Penelope for durable workflows.",
+      "node_ids": [[4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4]],
+      "edge_ids": [],
+      "source_path": "docs/design.md",
+      "line_start": 7,
+      "line_end": 8
+    },
+    {
+      "rank": 2,
+      "evidence_class": "SemanticInference",
+      "kind": "graph_path",
+      "text": "SyntaxMesh --Uses--> Penelope",
+      "node_ids": [[4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4]],
+      "edge_ids": [[5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5]],
+      "source_path": null,
+      "line_start": null,
+      "line_end": null
+    }
+  ],
+  "warnings": [{"code":"stale_source","message":"Changed source bytes excluded.","node_ids":[]}],
+  "omitted": {"source_evidence":1,"signatures":2,"graph_paths":3,"summaries":4}
+}

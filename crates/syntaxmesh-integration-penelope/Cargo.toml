@@ -1,0 +1,33 @@
+[package]
+name = "syntaxmesh-integration-penelope"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Penelope-backed durable workflow adapters for SyntaxMesh"
+
+[features]
+benchmark-instrumentation = []
+analytics-duckdb = ["dep:syntaxmesh-analytics-duckdb"]
+
+[dependencies]
+bincode.workspace = true
+hex.workspace = true
+penelope = "0.1.0"
+serde.workspace = true
+syntaxmesh-analytics-parquet.workspace = true
+syntaxmesh-analytics.workspace = true
+syntaxmesh-analytics-duckdb = { workspace = true, optional = true }
+syntaxmesh-core.workspace = true
+syntaxmesh-extension-sdk.workspace = true
+syntaxmesh-semantic.workspace = true
+syntaxmesh-store.workspace = true
+syntaxmesh-workflow.workspace = true
+
+[dev-dependencies]
+blake3.workspace = true
+tempfile.workspace = true
+syntaxmesh-store-turso.workspace = true
+
+[lints]
+workspace = true

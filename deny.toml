@@ -1,0 +1,41 @@
+[graph]
+all-features = true
+
+[advisories]
+ignore = [
+    # Bincode's v1 format is embedded in existing File snapshots, SQLite/Turso
+    # payloads, and Penelope records. Replacing it needs an ADR and explicit
+    # backward-compatible decoders; this is an unmaintained notice, not a
+    # vulnerability advisory. Reassess before the first stable release.
+    { id = "RUSTSEC-2025-0141", reason = "Durable payload compatibility requires an ADR and migration path before replacing bincode v1; unmaintained notice only, no known vulnerability. Reassess before v0.1." },
+    # Apache Parquet's Rust crate requires paste for generated identifiers and
+    # exposes no feature that removes it. This is an unmaintained notice, not a
+    # vulnerability advisory; reconsider if parquet-rs replaces the macro.
+    { id = "RUSTSEC-2024-0436", reason = "The official parquet crate requires paste 1.0 and offers no feature-free alternative; this is an unmaintained notice with no known vulnerability. Reassess on parquet-rs upgrades before v0.1." },
+]
+
+[licenses]
+allow = [
+    "Apache-2.0",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "BSL-1.0",
+    # Required by DuckDB's crates.io bundled-engine build dependency graph.
+    "CDLA-Permissive-2.0",
+    "CC0-1.0",
+    "ISC",
+    "MIT",
+    "MPL-2.0",
+    "Unicode-3.0",
+    "Unlicense",
+    "Zlib",
+]
+
+[bans]
+multiple-versions = "allow"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []

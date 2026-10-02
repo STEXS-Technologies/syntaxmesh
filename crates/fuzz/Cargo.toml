@@ -1,0 +1,31 @@
+[package]
+name = "syntaxmesh-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+rust-version = "1.98.1"
+license = "MIT OR Apache-2.0"
+description = "Isolated coverage-guided fuzz targets for SyntaxMesh source extractors."
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+blake3 = "1"
+libfuzzer-sys = "0.4"
+syntaxmesh-core = { path = "../syntaxmesh-core" }
+syntaxmesh-lang-bash = { path = "../syntaxmesh-lang-bash" }
+syntaxmesh-lang-docs = { path = "../syntaxmesh-lang-docs" }
+syntaxmesh-lang-ecmascript = { path = "../syntaxmesh-lang-ecmascript" }
+syntaxmesh-lang-python = { path = "../syntaxmesh-lang-python" }
+syntaxmesh-lang-rust = { path = "../syntaxmesh-lang-rust" }
+syntaxmesh-language-sdk = { path = "../syntaxmesh-language-sdk" }
+
+[[bin]]
+name = "syntaxmesh_source_extractors"
+path = "fuzz_targets/source_extractors.rs"
+test = false
+doc = false
+
+[workspace]
+members = ["."]

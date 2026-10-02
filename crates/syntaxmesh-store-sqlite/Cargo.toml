@@ -1,0 +1,22 @@
+[package]
+name = "syntaxmesh-store-sqlite"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "SQLite reference and conformance backend for SyntaxMesh"
+
+[features]
+benchmark-instrumentation = ["syntaxmesh-store/benchmark-instrumentation"]
+
+[dependencies]
+bincode.workspace = true
+blake3.workspace = true
+rusqlite = { version = "0.40.2", default-features = false, features = ["bundled"] }
+serde.workspace = true
+serde_json.workspace = true
+syntaxmesh-core.workspace = true
+syntaxmesh-store.workspace = true
+
+[lints]
+workspace = true

@@ -1,0 +1,20 @@
+[package]
+name = "syntaxmesh-xtask"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+blake3.workspace = true
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+regex.workspace = true
+rusqlite = { version = "0.40.2", default-features = false, features = ["bundled"] }
+serde_json.workspace = true
+syn.workspace = true
+tempfile.workspace = true
+
+[lints]
+workspace = true

@@ -1,0 +1,21 @@
+[package]
+name = "syntaxmesh-analytics-parquet"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Restartable Parquet partitions for SyntaxMesh analytical history."
+
+[dependencies]
+blake3.workspace = true
+parquet.workspace = true
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+syntaxmesh-analytics.workspace = true
+syntaxmesh-core.workspace = true
+syntaxmesh-store.workspace = true
+tempfile.workspace = true
+
+[lints]
+workspace = true

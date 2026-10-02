@@ -1,0 +1,11 @@
+[package]
+name = "syntaxmesh-turso-fts-probe"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[dependencies]
+tokio = { version = "1", features = ["rt", "time"] }
+turso = { version = "=0.8.0-pre.13", default-features = false, features = ["fts"] }

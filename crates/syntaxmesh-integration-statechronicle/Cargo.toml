@@ -1,0 +1,18 @@
+[package]
+name = "syntaxmesh-integration-statechronicle"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "StateChronicle generation verification adapter for SyntaxMesh"
+
+[dependencies]
+serde_json.workspace = true
+serde.workspace = true
+statechronicle = "0.1.0"
+syntaxmesh-core.workspace = true
+syntaxmesh-store.workspace = true
+syntaxmesh-workflow.workspace = true
+
+[lints]
+workspace = true

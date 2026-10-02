@@ -1,0 +1,1 @@
+DROP INDEX IF EXISTS syntaxmesh_fact_versions_identity_end_idx;

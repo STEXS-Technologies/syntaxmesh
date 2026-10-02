@@ -1,0 +1,18 @@
+[package]
+name = "syntaxmesh-analytics"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Typed Arrow feed for downstream SyntaxMesh history analytics."
+
+[dependencies]
+arrow-array.workspace = true
+arrow-schema.workspace = true
+blake3.workspace = true
+syntaxmesh-core.workspace = true
+syntaxmesh-store.workspace = true
+
+[lints]
+workspace = true

@@ -1,0 +1,195 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/syntaxmesh-core",
+    "crates/syntaxmesh-api-model",
+    "crates/syntaxmesh-runtime-protocol",
+    "crates/syntaxmesh-extension-sdk",
+    "crates/syntaxmesh-extension-ipc",
+    "crates/syntaxmesh-semantic",
+    "crates/syntaxmesh-store",
+    "crates/syntaxmesh-language-sdk",
+    "crates/syntaxmesh-resolver",
+    "crates/syntaxmesh-lang-rust",
+    "crates/syntaxmesh-lang-python",
+    "crates/syntaxmesh-lang-ecmascript",
+    "crates/syntaxmesh-lang-bash",
+    "crates/syntaxmesh-lang-docs",
+    "crates/syntaxmesh-indexer",
+    "crates/syntaxmesh-query",
+    "crates/syntaxmesh-cli",
+    "crates/syntaxmesh-workflow",
+    "crates/syntaxmesh-integration-penelope",
+    "crates/syntaxmesh-integration-statechronicle",
+    "crates/syntaxmesh-engine",
+    "crates/syntaxmesh-graph",
+    "crates/syntaxmesh-store-turso",
+    "crates/syntaxmesh-store-sqlite",
+    "crates/syntaxmesh-analytics",
+    "crates/syntaxmesh-analytics-parquet",
+    "crates/syntaxmesh-analytics-duckdb",
+    "crates/syntaxmesh-scanner",
+    "xtask",
+    "crates/syntaxmesh-mcp",
+    "crates/syntaxmesh-http",
+    "crates/syntaxmesh-context-host",
+    "crates/syntaxmesh-watch",
+    "crates/syntaxmesh-watch-host",
+    "crates/syntaxmesh-source-host",
+    "crates/syntaxmesh-ownership-host",
+    "crates/syntaxmesh-daemon",
+]
+exclude = ["crates/fuzz"]
+
+[workspace.package]
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.98.1"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/STEXS-Technologies/syntaxmesh"
+
+[workspace.dependencies]
+axum = { version = "0.8.9", default-features = false, features = ["http1", "json", "query", "tokio"] }
+base64 = { version = "0.23.1", default-features = false, features = ["std"] }
+blake3 = "1"
+bincode = "1.3"
+hex = "0.4"
+ignore = "0.4"
+imbl = { version = "7.0.2", features = ["serde"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+petgraph = { version = "0.8.3", default-features = false, features = ["std", "graphmap"] }
+arrow-array = "58.4.0"
+arrow-schema = "58.4.0"
+parquet = { version = "58.4.0", default-features = false, features = ["arrow"] }
+duckdb = { version = "~1.10505.0", features = ["parquet", "appender-arrow"] }
+tempfile = "3"
+regex = "1"
+toml = "1.1.6"
+reqwest = { version = "0.13.5", default-features = false, features = ["blocking", "json", "rustls"] }
+url = "2.5.8"
+httpdate = "1.0.3"
+syn = { version = "3", features = ["full", "visit"] }
+quote = "1"
+proc-macro2 = { version = "1", features = ["span-locations"] }
+proptest = "1"
+tree-sitter = "0.27.0"
+tree-sitter-python = "0.25.0"
+tree-sitter-bash = "0.25.1"
+pulldown-cmark = "0.13.4"
+github-slugger = "0.1.0"
+percent-encoding = "2.3.2"
+oxc_allocator = "0.152.0"
+oxc_ast = "0.152.0"
+oxc_ast_visit = "0.152.0"
+oxc_parser = "0.152.0"
+oxc_resolver = "11.24.3"
+oxc_span = "0.152.0"
+rmcp = { version = "3.1", features = ["server", "macros", "schemars", "transport-io"] }
+schemars = "1"
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+syntaxmesh-core = { path = "crates/syntaxmesh-core" }
+syntaxmesh-runtime-protocol = { path = "crates/syntaxmesh-runtime-protocol" }
+syntaxmesh-language-sdk = { path = "crates/syntaxmesh-language-sdk" }
+syntaxmesh-resolver = { path = "crates/syntaxmesh-resolver" }
+syntaxmesh-store = { path = "crates/syntaxmesh-store" }
+syntaxmesh-lang-rust = { path = "crates/syntaxmesh-lang-rust" }
+syntaxmesh-lang-python = { path = "crates/syntaxmesh-lang-python" }
+syntaxmesh-lang-ecmascript = { path = "crates/syntaxmesh-lang-ecmascript" }
+syntaxmesh-lang-bash = { path = "crates/syntaxmesh-lang-bash" }
+syntaxmesh-lang-docs = { path = "crates/syntaxmesh-lang-docs" }
+syntaxmesh-indexer = { path = "crates/syntaxmesh-indexer" }
+syntaxmesh-api-model = { path = "crates/syntaxmesh-api-model" }
+syntaxmesh-query = { path = "crates/syntaxmesh-query" }
+syntaxmesh-context-host = { path = "crates/syntaxmesh-context-host" }
+syntaxmesh-workflow = { path = "crates/syntaxmesh-workflow" }
+syntaxmesh-integration-penelope = { path = "crates/syntaxmesh-integration-penelope" }
+syntaxmesh-integration-statechronicle = { path = "crates/syntaxmesh-integration-statechronicle" }
+syntaxmesh-engine = { path = "crates/syntaxmesh-engine" }
+syntaxmesh-extension-sdk = { path = "crates/syntaxmesh-extension-sdk" }
+syntaxmesh-semantic = { path = "crates/syntaxmesh-semantic" }
+syntaxmesh-graph = { path = "crates/syntaxmesh-graph" }
+syntaxmesh-store-turso = { path = "crates/syntaxmesh-store-turso" }
+syntaxmesh-store-sqlite = { path = "crates/syntaxmesh-store-sqlite" }
+syntaxmesh-analytics = { path = "crates/syntaxmesh-analytics" }
+syntaxmesh-analytics-parquet = { path = "crates/syntaxmesh-analytics-parquet" }
+syntaxmesh-analytics-duckdb = { path = "crates/syntaxmesh-analytics-duckdb" }
+syntaxmesh-scanner = { path = "crates/syntaxmesh-scanner" }
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+rust_2024_prelude_collisions = "warn"
+rust_2024_incompatible_pat = "warn"
+rust_2024_guarded_string_incompatible_syntax = "warn"
+deprecated_safe_2024 = "warn"
+
+[workspace.lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+inefficient_to_string = "deny"
+todo = "deny"
+unimplemented = "deny"
+panic = "deny"
+result_large_err = "deny"
+map_err_ignore = "deny"
+unreachable = "deny"
+dbg_macro = "deny"
+ignored_unit_patterns = "deny"
+await_holding_refcell_ref = "deny"
+match_bool = "deny"
+if_same_then_else = "deny"
+needless_pass_by_value = "deny"
+borrowed_box = "deny"
+str_to_string = "deny"
+filter_map_next = "deny"
+iter_not_returning_iterator = "deny"
+needless_collect = "deny"
+wildcard_enum_match_arm = "deny"
+missing_errors_doc = "deny"
+missing_panics_doc = "deny"
+undocumented_unsafe_blocks = "deny"
+let_underscore_must_use = "deny"
+must_use_candidate = "deny"
+match_wild_err_arm = "deny"
+indexing_slicing = "deny"
+panic_in_result_fn = "deny"
+unwrap_in_result = "deny"
+disallowed_macros = "deny"
+missing_const_for_fn = "deny"
+implicit_clone = "deny"
+redundant_clone = "deny"
+lossy_float_literal = "deny"
+unnecessary_wraps = "deny"
+map_flatten = "deny"
+or_fun_call = "deny"
+ok_expect = "deny"
+await_holding_lock = "deny"
+mutex_atomic = "deny"
+needless_borrow = "deny"
+wildcard_dependencies = "deny"
+enum_glob_use = "deny"
+match_ref_pats = "deny"
+wrong_self_convention = "deny"
+trivially_copy_pass_by_ref = "deny"
+ptr_arg = "deny"
+needless_lifetimes = "deny"
+mutable_key_type = "deny"
+large_enum_variant = "deny"
+vec_box = "deny"
+float_cmp = "deny"
+bool_assert_comparison = "deny"
+cmp_owned = "deny"
+string_add = "deny"
+assertions_on_constants = "deny"
+useless_asref = "deny"
+shadow_unrelated = "deny"
+arithmetic_side_effects = "deny"
+float_arithmetic = "deny"
+box_collection = "deny"
+unnecessary_box_returns = "deny"
+trait_duplication_in_bounds = "deny"
+single_char_lifetime_names = "deny"
+format_push_string = "deny"
+option_if_let_else = "deny"
+manual_string_new = "deny"
+flat_map_option = "deny"

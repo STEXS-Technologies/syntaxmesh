@@ -1,0 +1,23 @@
+[package]
+name = "syntaxmesh-query"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[features]
+benchmark-instrumentation = ["syntaxmesh-store/benchmark-instrumentation"]
+
+[dependencies]
+blake3.workspace = true
+serde_json.workspace = true
+rust-stemmers = "=1.2.0"
+syntaxmesh-api-model.workspace = true
+syntaxmesh-core.workspace = true
+syntaxmesh-graph.workspace = true
+syntaxmesh-language-sdk.workspace = true
+syntaxmesh-store.workspace = true
+
+[lints]
+workspace = true

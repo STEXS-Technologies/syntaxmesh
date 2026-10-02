@@ -1,0 +1,20 @@
+[package]
+name = "syntaxmesh-out-of-tree-extension-fixture"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[features]
+default = ["embedded"]
+embedded = ["dep:syntaxmesh-engine", "dep:syntaxmesh-lang-rust", "dep:syntaxmesh-store"]
+
+[dependencies]
+syntaxmesh-core = { path = "../../crates/syntaxmesh-core" }
+syntaxmesh-engine = { path = "../../crates/syntaxmesh-engine", optional = true }
+syntaxmesh-extension-sdk = { path = "../../crates/syntaxmesh-extension-sdk" }
+syntaxmesh-extension-ipc = { path = "../../crates/syntaxmesh-extension-ipc" }
+syntaxmesh-lang-rust = { path = "../../crates/syntaxmesh-lang-rust", optional = true }
+syntaxmesh-runtime-protocol = { path = "../../crates/syntaxmesh-runtime-protocol" }
+syntaxmesh-store = { path = "../../crates/syntaxmesh-store", optional = true }

@@ -1,0 +1,25 @@
+[package]
+name = "syntaxmesh-analytics-duckdb"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Rust DuckDB queries and materialization for SyntaxMesh fact history."
+
+[dependencies]
+duckdb.workspace = true
+hex.workspace = true
+syntaxmesh-analytics.workspace = true
+syntaxmesh-analytics-parquet.workspace = true
+syntaxmesh-core.workspace = true
+syntaxmesh-store.workspace = true
+
+[dev-dependencies]
+blake3.workspace = true
+serde_json.workspace = true
+syntaxmesh-store.workspace = true
+tempfile.workspace = true
+
+[lints]
+workspace = true

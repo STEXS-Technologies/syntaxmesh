@@ -1,0 +1,22 @@
+[package]
+name = "syntaxmesh-indexer"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+blake3.workspace = true
+syntaxmesh-core.workspace = true
+syntaxmesh-lang-rust.workspace = true
+syntaxmesh-language-sdk.workspace = true
+syntaxmesh-resolver.workspace = true
+syntaxmesh-store.workspace = true
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+syntaxmesh-lang-ecmascript.workspace = true
+tempfile.workspace = true

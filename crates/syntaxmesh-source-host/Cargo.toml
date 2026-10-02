@@ -1,0 +1,31 @@
+[package]
+name = "syntaxmesh-source-host"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Reusable supported source extractor pack for SyntaxMesh hosts"
+
+[dependencies]
+blake3.workspace = true
+syntaxmesh-engine.workspace = true
+syntaxmesh-scanner.workspace = true
+syntaxmesh-store.workspace = true
+oxc_resolver.workspace = true
+syntaxmesh-core.workspace = true
+syntaxmesh-resolver.workspace = true
+serde.workspace = true
+toml.workspace = true
+syntaxmesh-language-sdk.workspace = true
+syntaxmesh-lang-rust.workspace = true
+syntaxmesh-lang-python.workspace = true
+syntaxmesh-lang-ecmascript.workspace = true
+syntaxmesh-lang-bash.workspace = true
+syntaxmesh-lang-docs.workspace = true
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

@@ -1051,9 +1051,19 @@ fn context_sibling_source_retrieval_evaluation() -> Result<(), Box<dyn Error>> {
                                 .ok_or_else(|| "lexical seed disappeared from pinned generation".to_owned())?;
                             let path = node.source.as_ref()
                                 .and_then(|source| files.get(&source.file_id));
+                            let source_span_bytes = node.source.as_ref().and_then(|source|
+                                source.span.end_byte.checked_sub(source.span.start_byte));
+                            let identifier_rank = ranked.iter()
+                                .position(|candidate| candidate.node.id == *id)
+                                .map(|rank| rank + 1);
+                            let identifier_score = ranked.iter()
+                                .find(|candidate| candidate.node.id == *id)
+                                .map(|candidate| candidate.score);
                             let name = node.name.chars().take(120).collect::<String>();
                             Ok(serde_json::json!({"name": name, "kind": format!("{:?}", node.kind),
-                                "path": path, "selected": selected.contains(id)}))
+                                "path": path, "selected": selected.contains(id),
+                                "source_span_bytes": source_span_bytes,
+                                "identifier_rank": identifier_rank, "identifier_score": identifier_score}))
                         }).collect::<Result<Vec<_>, String>>()?;
                         let candidate_rank = ranked.iter().position(|candidate| candidate.node.id == expected_id)
                             .map(|rank| rank + 1);

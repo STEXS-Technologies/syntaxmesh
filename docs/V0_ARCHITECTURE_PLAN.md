@@ -45,6 +45,22 @@ repository-wide quality claims. Bundles:
 `context-20261022T183804.278231Z-078bf55313cd` (Shardline), under ignored
 `target/context-retrieval-results/`.
 
+### Source-content identifier ranking (2026-10-22)
+
+[ADR-0389](adr/0389-separate-identifier-and-source-content-ranking.md)
+separates bounded node-label and source-body exact postings so concise exact
+identifier matches are not buried by broad body matches. Opt-in source-content
+seed scoring combines label relevance with the stronger body exact/stem signal,
+uses deterministic tie-breaks, and carries that ordering into the final packing
+plan without changing label-only queries or persisted state. Three fresh runs
+on the same selected Shardline input fingerprint retrieved all 7/7 targets at
+both 2,048 and 8,192 tokens (21/21 checks per budget; median 1.71 s / 3.65 s).
+A one-run prior-code comparison on the same inputs retrieved 6/7 at both
+budgets, missing `load_metadata`. Penelope remained 12/12 and StateChronicle
+9/9 at each budget in three-run checks. This is selected-file evidence, not a
+repository-wide quality or latency claim; source-content remains opt-in. Raw
+bundles are under ignored `target/context-retrieval-results/`.
+
 ### Current execution priority: the complete v0–v5 vision
 
 [ADR-0365](adr/0365-registered-inference-stream-setup.md) closes the missing

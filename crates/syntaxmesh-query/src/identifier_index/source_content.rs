@@ -263,6 +263,11 @@ impl GenerationIdentifierIndex {
             postings.retain(|id| !excluded.contains(id));
         }
         self.postings.retain(|_, postings| !postings.is_empty());
+        for postings in self.source_postings.values_mut() {
+            postings.retain(|id| !excluded.contains(id));
+        }
+        self.source_postings
+            .retain(|_, postings| !postings.is_empty());
         if let Some(planner) = &mut self.planner {
             planner.remove_candidates(&excluded);
         }
@@ -295,7 +300,14 @@ fn insert_source_posting(
     posting_limit: usize,
     payload_limit: usize,
 ) -> Result<(), QueryError> {
-    let postings = index.postings.entry(term.to_owned()).or_default();
+    if index
+        .postings
+        .get(term)
+        .is_some_and(|postings| postings.binary_search(&id).is_ok())
+    {
+        return Ok(());
+    }
+    let postings = index.source_postings.entry(term.to_owned()).or_default();
     match postings.binary_search(&id) {
         Ok(_) => Ok(()),
         Err(position) => {

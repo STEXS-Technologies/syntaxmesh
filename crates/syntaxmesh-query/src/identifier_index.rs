@@ -27,6 +27,7 @@ pub struct GenerationIdentifierIndex {
     manifest: GenerationManifest,
     population: usize,
     postings: BTreeMap<String, Vec<NodeId>>,
+    source_postings: BTreeMap<String, Vec<NodeId>>,
     planner: Option<lexical::PlannerData>,
     source_span_augmented: bool,
     #[cfg(feature = "benchmark-instrumentation")]
@@ -105,6 +106,7 @@ impl GenerationIdentifierIndex {
             manifest: store.manifest(generation)?,
             population: 0,
             postings: BTreeMap::new(),
+            source_postings: BTreeMap::new(),
             planner: planner.then(lexical::PlannerData::default),
             source_span_augmented: false,
             #[cfg(feature = "benchmark-instrumentation")]

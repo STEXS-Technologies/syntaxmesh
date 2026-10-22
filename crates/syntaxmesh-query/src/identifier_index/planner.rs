@@ -107,31 +107,68 @@ impl GenerationIdentifierIndex {
         request: &LexicalPlanRequest<'_>,
         limit: usize,
     ) -> Result<Vec<NodeId>, QueryError> {
-        let scores = |channel, posting_budget| LexicalCandidateRequest {
+        self.source_content_order(store, generation, request, None, limit)
+    }
+
+    fn source_content_order<S: GraphStore + ?Sized>(
+        &self,
+        store: &S,
+        generation: GenerationId,
+        request: &LexicalPlanRequest<'_>,
+        eligible: Option<&BTreeSet<NodeId>>,
+        limit: usize,
+    ) -> Result<Vec<NodeId>, QueryError> {
+        let candidate_request = |channel, posting_budget| LexicalCandidateRequest {
             query: request.query,
             channel,
             family: None,
-            eligible: None,
+            eligible,
             posting_budget,
             limit,
         };
-        let exact = self.lexical_channel_scores(
+        let terms = crate::identifier_terms(request.query);
+        let name_exact = self.lexical_scores_from_postings(
             store,
             generation,
-            &scores(LexicalChannel::Exact, request.posting_budget),
+            &candidate_request(LexicalChannel::Exact, request.posting_budget),
+            terms.clone(),
+            &self.postings,
+            None,
         )?;
-        let stem_budget = request
+        let body_exact_budget = request
             .posting_budget
-            .checked_sub(exact.1)
+            .checked_sub(name_exact.1)
             .ok_or(QueryError::InvalidLimit)?;
-        let stemmed = self.lexical_channel_scores(
+        let body_exact = self.lexical_scores_from_postings(
             store,
             generation,
-            &scores(LexicalChannel::Stemmed, stem_budget),
+            &candidate_request(LexicalChannel::Exact, body_exact_budget),
+            terms.clone(),
+            &self.source_postings,
+            None,
+        )?;
+        let stem_budget = body_exact_budget
+            .checked_sub(body_exact.1)
+            .ok_or(QueryError::InvalidLimit)?;
+        let stemmed = self.lexical_scores_from_postings(
+            store,
+            generation,
+            &candidate_request(LexicalChannel::Stemmed, stem_budget),
+            super::lexical::stem_terms(&terms),
+            &self
+                .planner
+                .as_ref()
+                .ok_or(QueryError::InvalidLimit)?
+                .stemmed,
+            None,
         )?;
         let data = self.planner.as_ref().ok_or(QueryError::InvalidLimit)?;
         Ok(source_content_seed_selection(
-            &exact.0, &stemmed.0, data, limit,
+            &name_exact.0,
+            &body_exact.0,
+            &stemmed.0,
+            data,
+            limit,
         ))
     }
 
@@ -163,11 +200,24 @@ impl GenerationIdentifierIndex {
         let ranked = complete.iter().copied().collect::<BTreeSet<_>>();
         complete.extend(selected.difference(&ranked).copied());
         self.prioritize_primary(&mut complete)?;
-        let lexical = complete
-            .iter()
-            .filter(|id| original.contains(id))
-            .copied()
-            .collect();
+        let lexical = if self.source_span_augmented && !original.is_empty() {
+            let mut ordered = self.source_content_order(
+                store,
+                generation,
+                request,
+                Some(original),
+                original.len(),
+            )?;
+            let score_ordered_ids = ordered.iter().copied().collect::<BTreeSet<_>>();
+            ordered.extend(original.difference(&score_ordered_ids).copied());
+            ordered
+        } else {
+            complete
+                .iter()
+                .filter(|id| original.contains(id))
+                .copied()
+                .collect()
+        };
         let discovered = complete
             .iter()
             .filter(|id| !original.contains(id))
@@ -281,33 +331,41 @@ impl GenerationIdentifierIndex {
 }
 
 fn source_content_seed_selection(
-    exact: &[(NodeId, u64)],
+    name_exact: &[(NodeId, u64)],
+    body_exact: &[(NodeId, u64)],
     stemmed: &[(NodeId, u64)],
     data: &super::lexical::PlannerData,
     limit: usize,
 ) -> Vec<NodeId> {
-    let mut scores = std::collections::BTreeMap::<NodeId, u64>::new();
-    for (id, score) in exact.iter().chain(stemmed) {
-        scores
-            .entry(*id)
-            .and_modify(|current| *current = (*current).max(*score))
-            .or_insert(*score);
+    let mut scores = std::collections::BTreeMap::<NodeId, (u64, u64)>::new();
+    for (id, score) in name_exact {
+        scores.entry(*id).or_default().0 = *score;
+    }
+    for (id, score) in body_exact.iter().chain(stemmed) {
+        let content_score = &mut scores.entry(*id).or_default().1;
+        *content_score = (*content_score).max(*score);
     }
     let mut primary = Vec::new();
     let mut secondary = Vec::new();
-    for (id, score) in scores {
+    for (id, (name_score, content_score)) in scores {
+        let score = name_score.saturating_add(content_score);
         match data.families.get(&id) {
             Some(LexicalFamily::Code | LexicalFamily::Documentation) => {
-                primary.push((id, score));
+                primary.push((id, score, name_score, content_score));
             }
             Some(LexicalFamily::Reference | LexicalFamily::Other) => {
-                secondary.push((id, score));
+                secondary.push((id, score, name_score, content_score));
             }
             None => {}
         }
     }
-    let rank = |left: &(NodeId, u64), right: &(NodeId, u64)| {
-        right.1.cmp(&left.1).then_with(|| left.0.cmp(&right.0))
+    let rank = |left: &(NodeId, u64, u64, u64), right: &(NodeId, u64, u64, u64)| {
+        right
+            .1
+            .cmp(&left.1)
+            .then_with(|| right.2.cmp(&left.2))
+            .then_with(|| right.3.cmp(&left.3))
+            .then_with(|| left.0.cmp(&right.0))
     };
     primary.sort_by(rank);
     secondary.sort_by(rank);
@@ -316,7 +374,7 @@ fn source_content_seed_selection(
     let mut selected = Vec::with_capacity(limit.min(256));
     let mut selected_ids = std::collections::BTreeSet::new();
     let mut selected_files = std::collections::BTreeSet::new();
-    for (id, _) in &primary {
+    for (id, _, _, _) in &primary {
         let new_file = data
             .source_files
             .get(id)
@@ -328,7 +386,7 @@ fn source_content_seed_selection(
             break;
         }
     }
-    for (id, _) in primary.iter().chain(&secondary) {
+    for (id, _, _, _) in primary.iter().chain(&secondary) {
         if selected.len() >= limit.min(256) {
             break;
         }

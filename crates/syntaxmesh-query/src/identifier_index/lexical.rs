@@ -62,10 +62,10 @@ pub(super) struct PlannerData {
     pub(super) families: BTreeMap<NodeId, LexicalFamily>,
     pub(super) test_intent: BTreeSet<NodeId>,
     pub(super) source_files: BTreeMap<NodeId, FileId>,
-    stemmed: BTreeMap<String, Vec<NodeId>>,
+    pub(super) stemmed: BTreeMap<String, Vec<NodeId>>,
 }
 
-fn stem_terms(terms: &BTreeSet<String>) -> BTreeSet<String> {
+pub(super) fn stem_terms(terms: &BTreeSet<String>) -> BTreeSet<String> {
     let stemmer = rust_stemmers::Stemmer::create(rust_stemmers::Algorithm::English);
     terms
         .iter()
@@ -217,6 +217,38 @@ impl GenerationIdentifierIndex {
         request: &LexicalCandidateRequest<'_>,
     ) -> Result<(Vec<(NodeId, u64)>, usize), QueryError> {
         let data = self.planner.as_ref().ok_or(QueryError::InvalidLimit)?;
+        let (terms, postings, additional_postings) = match request.channel {
+            LexicalChannel::Exact => (
+                identifier_terms(request.query),
+                &self.postings,
+                Some(&self.source_postings),
+            ),
+            LexicalChannel::Stemmed => (
+                stem_terms(&identifier_terms(request.query)),
+                &data.stemmed,
+                None,
+            ),
+        };
+        self.lexical_scores_from_postings(
+            store,
+            generation,
+            request,
+            terms,
+            postings,
+            additional_postings,
+        )
+    }
+
+    pub(super) fn lexical_scores_from_postings<S: GraphStore + ?Sized>(
+        &self,
+        store: &S,
+        generation: GenerationId,
+        request: &LexicalCandidateRequest<'_>,
+        terms: BTreeSet<String>,
+        postings: &BTreeMap<String, Vec<NodeId>>,
+        additional_postings: Option<&BTreeMap<String, Vec<NodeId>>>,
+    ) -> Result<(Vec<(NodeId, u64)>, usize), QueryError> {
+        let data = self.planner.as_ref().ok_or(QueryError::InvalidLimit)?;
         let exact = identifier_terms(request.query);
         if generation != self.generation
             || request.posting_budget == 0
@@ -239,40 +271,27 @@ impl GenerationIdentifierIndex {
             )
             .into());
         }
-        let (terms, postings) = match request.channel {
-            LexicalChannel::Exact => (exact, &self.postings),
-            LexicalChannel::Stemmed => (stem_terms(&exact), &data.stemmed),
-        };
         let population = u64::try_from(self.population)
             .map_err(|error| QueryError::Context(error.to_string()))?;
         let mut visits = 0_usize;
         let mut scores = BTreeMap::<NodeId, (u64, u64)>::new();
         for term in terms {
-            let Some(ids) = postings.get(&term) else {
+            let ids = postings.get(&term).map_or(&[][..], Vec::as_slice);
+            let extra = additional_postings
+                .and_then(|additional| additional.get(&term))
+                .map_or(&[][..], Vec::as_slice);
+            if ids.is_empty() && extra.is_empty() {
                 continue;
-            };
-            let frequency =
-                u64::try_from(ids.len()).map_err(|error| QueryError::Context(error.to_string()))?;
+            }
+            let frequency = u64::try_from(ids.len().saturating_add(extra.len()))
+                .map_err(|error| QueryError::Context(error.to_string()))?;
             let weight = crate::ranked_candidates::rarity_weight(population, frequency);
-            for id in ids {
-                if visits >= request.posting_budget {
-                    return Err(QueryError::Context(
-                        "lexical candidate posting budget exhausted".to_owned(),
-                    ));
+            for id in ids.iter().chain(extra) {
+                if score_posting(*id, request, data, &mut visits)? {
+                    let score = scores.entry(*id).or_default();
+                    score.0 = score.0.saturating_add(weight);
+                    score.1 = score.1.saturating_add(1);
                 }
-                visits = visits.saturating_add(1);
-                if request
-                    .family
-                    .is_some_and(|family| data.families.get(id) != Some(&family))
-                    || request
-                        .eligible
-                        .is_some_and(|eligible| !eligible.contains(id))
-                {
-                    continue;
-                }
-                let score = scores.entry(*id).or_default();
-                score.0 = score.0.saturating_add(weight);
-                score.1 = score.1.saturating_add(1);
             }
         }
         let mut ranked = scores
@@ -282,6 +301,26 @@ impl GenerationIdentifierIndex {
         ranked.sort_by(|left, right| right.1.cmp(&left.1).then_with(|| left.0.cmp(&right.0)));
         Ok((ranked, visits))
     }
+}
+
+fn score_posting(
+    id: NodeId,
+    request: &LexicalCandidateRequest<'_>,
+    data: &PlannerData,
+    visits: &mut usize,
+) -> Result<bool, QueryError> {
+    if *visits >= request.posting_budget {
+        return Err(QueryError::Context(
+            "lexical candidate posting budget exhausted".to_owned(),
+        ));
+    }
+    *visits = (*visits).saturating_add(1);
+    Ok(!request
+        .family
+        .is_some_and(|family| data.families.get(&id) != Some(&family))
+        && !request
+            .eligible
+            .is_some_and(|eligible| !eligible.contains(&id)))
 }
 
 #[cfg(test)]

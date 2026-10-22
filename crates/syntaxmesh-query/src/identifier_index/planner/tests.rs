@@ -475,7 +475,7 @@ fn source_content_seed_scores_keep_ranked_candidates_beyond_channel_quota() -> R
         }
     }
     let target = target.ok_or(QueryError::InvalidLimit)?;
-    let selected = super::source_content_seed_selection(&exact, &[], &data, 32);
+    let selected = super::source_content_seed_selection(&exact, &[], &[], &data, 32);
     assert_eq!(selected.len(), 32);
     assert!(selected.contains(&target));
     Ok(())
@@ -512,15 +512,15 @@ fn source_content_seed_scores_fuse_channels_and_defer_nonprimary_families() {
     ];
     let stemmed = [(code_stem_overlap, 100), (reference, 400)];
     assert_eq!(
-        super::source_content_seed_selection(&exact, &stemmed, &data, 2),
+        super::source_content_seed_selection(&[], &exact, &stemmed, &data, 2),
         [stronger_code, documentation]
     );
     assert_eq!(
-        super::source_content_seed_selection(&exact, &stemmed, &data, 3),
+        super::source_content_seed_selection(&[], &exact, &stemmed, &data, 3),
         [stronger_code, documentation, code_stem_overlap]
     );
     assert_eq!(
-        super::source_content_seed_selection(&exact, &stemmed, &data, 4),
+        super::source_content_seed_selection(&[], &exact, &stemmed, &data, 4),
         [stronger_code, documentation, code_stem_overlap, reference]
     );
 }
@@ -535,10 +535,30 @@ fn source_content_seed_diversity_treats_missing_provenance_as_singletons() {
             (id, 100 - rank)
         })
         .collect::<Vec<_>>();
-    let selected = super::source_content_seed_selection(&exact, &[], &data, 2);
+    let selected = super::source_content_seed_selection(&exact, &[], &[], &data, 2);
     assert_eq!(selected.len(), 2);
     assert_eq!(selected.first().copied(), exact.first().map(|item| item.0));
     assert_eq!(selected.get(1).copied(), exact.get(1).map(|item| item.0));
+}
+
+#[test]
+fn source_content_name_match_breaks_ties_with_body_only_candidates() {
+    let mut data = super::super::lexical::PlannerData::default();
+    let named_symbol = NodeId::derive(&[b"source-name-match"]);
+    let body_match = NodeId::derive(&[b"source-body-match"]);
+    for id in [named_symbol, body_match] {
+        data.families.insert(id, LexicalFamily::Code);
+        data.source_files.insert(id, FileId::derive(&[&id.0.0]));
+    }
+    let selected = super::source_content_seed_selection(
+        &[(named_symbol, 20)],
+        &[(body_match, 20)],
+        &[],
+        &data,
+        2,
+    );
+    assert_eq!(selected.first().copied(), Some(named_symbol));
+    assert_eq!(selected.get(1).copied(), Some(body_match));
 }
 
 #[test]

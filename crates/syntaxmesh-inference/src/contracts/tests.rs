@@ -102,6 +102,40 @@ fn exact_result_retains_generation_and_opening_fact_version() -> Result<(), Infe
 }
 
 #[test]
+fn edge_visit_budget_is_spent_once_for_many_contracts() -> Result<(), InferenceError> {
+    let (nodes, premises, _rule, _) = fixture();
+    let premise = premises.first().ok_or(InferenceError::InvalidInput)?;
+    let contracts = (0..4)
+        .map(|index| {
+            contract(
+                &format!("required-{index}"),
+                premise.edge.source,
+                premise.edge.target,
+                RelationExpectation::Required,
+            )
+        })
+        .collect::<Vec<_>>();
+    let evaluated = evaluate_contracts(
+        &selection(&nodes, &premises),
+        &contracts,
+        &ContractLimits {
+            contracts: 4,
+            input_bytes: 16_384,
+            edge_visits: premises.len(),
+            results: 4,
+        },
+    )?;
+    if evaluated.len() != contracts.len()
+        || evaluated
+            .iter()
+            .any(|result| result.outcome != ContractOutcome::Supported)
+    {
+        return Err(InferenceError::InvalidInput);
+    }
+    Ok(())
+}
+
+#[test]
 fn malformed_duplicate_and_exhausted_contract_batches_are_rejected() -> Result<(), InferenceError> {
     let (nodes, premises, _rule, _) = fixture();
     let first = *nodes.first().ok_or(InferenceError::InvalidInput)?;

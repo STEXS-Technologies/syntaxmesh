@@ -2,10 +2,8 @@
 
 use crate::{InferenceError, Selection};
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeSet;
-use syntaxmesh_core::{
-    Edge, FactRef, FactVersionRef, GenerationId, NodeId, RelationKind, StableId,
-};
+use std::collections::{BTreeSet, HashMap};
+use syntaxmesh_core::{FactRef, FactVersionRef, GenerationId, NodeId, RelationKind, StableId};
 
 /// Origin of a contract declaration or evidence-derived expectation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -124,26 +122,36 @@ pub fn evaluate_contracts(
         }
     }
 
-    let mut remaining = limits.edge_visits;
+    let mut evidence_by_relation = HashMap::new();
+    if !ordered.is_empty() {
+        if selection.premises.len() > limits.edge_visits {
+            return Err(InferenceError::BudgetExhausted);
+        }
+        for premise in selection.premises {
+            let relation = serde_json::to_vec(&premise.edge.relation)
+                .map_err(|_encoding| InferenceError::IdentityEncoding)?;
+            let key = (premise.edge.source, premise.edge.target, relation);
+            let version = FactVersionRef {
+                fact: FactRef::Edge(premise.edge.id),
+                valid_from: premise.valid_from,
+            };
+            evidence_by_relation
+                .entry(key)
+                .and_modify(|current: &mut (syntaxmesh_core::EdgeId, FactVersionRef)| {
+                    if premise.edge.id < current.0 {
+                        *current = (premise.edge.id, version);
+                    }
+                })
+                .or_insert((premise.edge.id, version));
+        }
+    }
     let mut results = Vec::with_capacity(ordered.len());
     for contract in ordered {
-        let mut evidence: Option<(syntaxmesh_core::EdgeId, FactVersionRef)> = None;
-        for premise in selection.premises {
-            remaining = remaining
-                .checked_sub(1)
-                .ok_or(InferenceError::BudgetExhausted)?;
-            if relation_matches(&premise.edge, contract)
-                && evidence.is_none_or(|(current, _)| premise.edge.id < current)
-            {
-                evidence = Some((
-                    premise.edge.id,
-                    FactVersionRef {
-                        fact: FactRef::Edge(premise.edge.id),
-                        valid_from: premise.valid_from,
-                    },
-                ));
-            }
-        }
+        let relation = serde_json::to_vec(&contract.relation)
+            .map_err(|_encoding| InferenceError::IdentityEncoding)?;
+        let evidence = evidence_by_relation
+            .get(&(contract.source, contract.target, relation))
+            .copied();
         let outcome = match (contract.expectation, evidence.is_some()) {
             (RelationExpectation::Required, true) => ContractOutcome::Supported,
             (RelationExpectation::Forbidden, true) => ContractOutcome::Contradicted,
@@ -164,12 +172,6 @@ pub fn evaluate_contracts(
         });
     }
     Ok(results)
-}
-
-fn relation_matches(edge: &Edge, contract: &Contract) -> bool {
-    edge.source == contract.source
-        && edge.target == contract.target
-        && edge.relation == contract.relation
 }
 
 #[cfg(test)]

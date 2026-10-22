@@ -184,6 +184,13 @@ Durable authored contracts/results, policy enforcement, and measured harness
 benefit remain open; this advances v2/v4 integration but is not release
 completion.
 
+[ADR-0379](adr/0379-indexed-contract-evidence-evaluation.md) replaces the
+contract-by-premise nested scan with one bounded, query-local exact-relation
+index. `edge_visits` now bounds the single premise-indexing pass; outcomes,
+lowest-EdgeId evidence selection, and generation-scoped identities are
+unchanged. Durable contract-result history (v5 Stage C) and selection
+materialization across repeated queries remain open.
+
 After this retrieval and target-discovery change, `cargo make ci` passed in
 184.40 seconds on 2026-10-22. It covered workspace formatting, architecture,
 extension isolation, migration registries, instrumented/default checks, audit

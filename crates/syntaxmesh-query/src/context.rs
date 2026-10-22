@@ -6,7 +6,9 @@ use syntaxmesh_api_model::{
     CONTEXT_PACK_SCHEMA_VERSION, ContextItem, ContextItemKind, ContextPack, ContextRequest,
     ContextWarning,
 };
-use syntaxmesh_core::{Edge, EdgeId, FileVersion, Node, NodeId, NodeKind, SourceLocation};
+use syntaxmesh_core::{
+    Edge, EdgeId, FileVersion, Node, NodeId, NodeKind, RelationKind, SourceLocation,
+};
 
 use crate::{Query, QueryError, identifier_terms};
 
@@ -224,13 +226,50 @@ fn compile<S: syntaxmesh_store::GraphStore + ?Sized>(
 
     let mut candidates = Vec::new();
     let mut source_cache = source_cache::SourceCache::new(source_provider);
+    let mut relevance_edges = selected_edges.clone();
+    let mut sections_with_chunks = relevance_edges
+        .values()
+        .filter_map(|edge| {
+            (edge.relation == RelationKind::Contains
+                && selected_nodes
+                    .get(&edge.source)
+                    .is_some_and(|(node, _, _)| node.kind == NodeKind::Section)
+                && selected_nodes
+                    .get(&edge.target)
+                    .is_some_and(|(node, _, _)| node.kind == NodeKind::DocumentChunk))
+            .then_some(edge.source)
+        })
+        .collect::<BTreeSet<_>>();
+    for (section_id, (section, _, _)) in &selected_nodes {
+        if section.kind != NodeKind::Section || sections_with_chunks.contains(section_id) {
+            continue;
+        }
+        graph.visit_adjacent(*section_id, |edge| {
+            if edge.source == *section_id
+                && edge.relation == RelationKind::Contains
+                && selected_nodes
+                    .get(&edge.target)
+                    .is_some_and(|(node, _, _)| node.kind == NodeKind::DocumentChunk)
+            {
+                sections_with_chunks.insert(*section_id);
+                relevance_edges.insert(edge.id, edge);
+            }
+            Ok(())
+        })?;
+    }
+    let contextual_relevance =
+        ranking::document_section_relevance(&selected_nodes, &relevance_edges);
     for (node, distance, relevance) in selected_nodes.values() {
+        let relevance = contextual_relevance
+            .get(&node.id)
+            .copied()
+            .unwrap_or(*relevance);
         if let Some(location) = &node.source
             && let Some(candidate) = source_candidate(
                 node,
                 location,
                 *distance,
-                *relevance,
+                relevance,
                 &file_versions,
                 &mut source_cache,
                 &mut warnings,
@@ -246,7 +285,7 @@ fn compile<S: syntaxmesh_store::GraphStore + ?Sized>(
         candidates.push(signature_candidate(
             node,
             *distance,
-            *relevance,
+            relevance,
             source_file_id.and_then(|file_id| file_versions.get(&file_id)),
         ));
     }
@@ -264,7 +303,16 @@ fn compile<S: syntaxmesh_store::GraphStore + ?Sized>(
             candidates.push(Candidate {
                 kind: ContextItemKind::GraphPath,
                 granularity: SourceGranularity::Local,
-                relevance: source.2.saturating_add(target.2),
+                relevance: contextual_relevance
+                    .get(&source.0.id)
+                    .copied()
+                    .unwrap_or(source.2)
+                    .saturating_add(
+                        contextual_relevance
+                            .get(&target.0.id)
+                            .copied()
+                            .unwrap_or(target.2),
+                    ),
                 distance,
                 key: format!("edge:{}", edge.id.0.to_hex()),
                 item: ContextItem {
@@ -283,10 +331,14 @@ fn compile<S: syntaxmesh_store::GraphStore + ?Sized>(
     }
 
     for (node, distance, relevance) in selected_nodes.values() {
+        let relevance = contextual_relevance
+            .get(&node.id)
+            .copied()
+            .unwrap_or(*relevance);
         candidates.push(Candidate {
             kind: ContextItemKind::Summary,
             granularity: SourceGranularity::Local,
-            relevance: *relevance,
+            relevance,
             distance: *distance,
             key: format!("summary:{}", node.id.0.to_hex()),
             item: ContextItem {

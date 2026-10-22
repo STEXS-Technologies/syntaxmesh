@@ -20,6 +20,31 @@ respectively. This is a bounded iteration signal on a dirty selected fixture,
 not a repository-wide relevance or performance claim. Raw evidence is retained
 under ignored `target/context-retrieval-results/`.
 
+### Documentation context relevance (2026-10-22)
+
+[ADR-0388](adr/0388-document-section-context-relevance.md) keeps a selected
+Markdown heading alongside selected prose that makes it relevant: when a
+zero-hop packing plan contains both a `Section` and its `DocumentChunk`, the
+query reads their direct containment relationship for ranking only. It does
+not expand the graph or add relationship evidence to the pack. The deterministic
+Query test, strict Clippy, and formatting pass. Three fresh indexed
+source-content runs on selected STEXS files retrieve all Penelope targets at
+both budgets (12/12 per budget; median 0.89 s / 1.24 s at 2,048 / 8,192 tokens)
+and all StateChronicle targets (9/9; 1.58 s / 3.17 s). Shardline remains 18/21
+at both budgets because `load_metadata` is omitted in every run at both sizes;
+this Python function miss is outside the documentation-heading change and
+remains an open source-content packing/relevance issue. A focused diagnostic
+confirms candidate recall is not the failure: `load_metadata` is identifier
+candidate rank 9, selected as seed 8 of 32 (zero-based position 7), and appears
+at packing position 8 (zero-based); it is still omitted at both budgets. The
+next retrieval iteration must improve query-relevant source ordering/packing
+without merely raising global limits. These selected-file results are not
+repository-wide quality claims. Bundles:
+`context-20261022T183626.098560Z-078bf55313cd` (Penelope),
+`context-20261022T183707.007984Z-078bf55313cd` (StateChronicle), and
+`context-20261022T183804.278231Z-078bf55313cd` (Shardline), under ignored
+`target/context-retrieval-results/`.
+
 ### Current execution priority: the complete v0–v5 vision
 
 [ADR-0365](adr/0365-registered-inference-stream-setup.md) closes the missing

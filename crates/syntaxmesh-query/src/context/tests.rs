@@ -2,6 +2,7 @@ use super::{
     Candidate, ContextSourceProvider, ContextTokenCounter, candidate_search_limit,
     deduplicate_candidates, finalize_count, identifier_terms, lexical_relevance, line_span,
 };
+use std::collections::BTreeMap;
 use syntaxmesh_api_model::{
     CONTEXT_PACK_SCHEMA_VERSION, ContextItem, ContextItemKind, ContextPack, ContextRequest,
     OmittedContextSummary,
@@ -321,6 +322,195 @@ fn source_granularity_uses_canonical_node_kinds() {
             SourceGranularity::Occurrence
         );
     }
+}
+
+#[test]
+fn selected_document_section_inherits_only_its_direct_chunk_relevance() {
+    let section_id = NodeId::derive(&[b"section"]);
+    let chunk_id = NodeId::derive(&[b"chunk"]);
+    let unrelated_section_id = NodeId::derive(&[b"unrelated-section"]);
+    let make_node = |id, kind, name: &str| Node {
+        id,
+        kind,
+        name: name.to_owned(),
+        owner_file: None,
+        source: None,
+        provenance: ProvenanceId::derive(&[b"section-relevance-provenance"]),
+        extension_payload: None,
+    };
+    let section = make_node(section_id, NodeKind::Section, "Recovery");
+    let chunk = make_node(
+        chunk_id,
+        NodeKind::DocumentChunk,
+        "Fencing enables recovery",
+    );
+    let unrelated_section = make_node(
+        unrelated_section_id,
+        NodeKind::Section,
+        "Unrelated operations",
+    );
+    let mut selected_nodes = BTreeMap::from([
+        (section_id, (section, 0, 2)),
+        (chunk_id, (chunk, 0, 9)),
+        (unrelated_section_id, (unrelated_section, 0, 1)),
+    ]);
+    let edge_id = EdgeId::derive(&[b"section-contains-chunk"]);
+    let selected_edges = BTreeMap::from([(
+        edge_id,
+        Edge {
+            id: edge_id,
+            source: section_id,
+            target: chunk_id,
+            relation: RelationKind::Contains,
+            provenance: ProvenanceId::derive(&[b"section-relevance-provenance"]),
+            extension_payload: None,
+        },
+    )]);
+
+    let relevance = super::ranking::document_section_relevance(&selected_nodes, &selected_edges);
+    assert_eq!(relevance.get(&section_id), Some(&9));
+    assert_eq!(relevance.get(&chunk_id), Some(&9));
+    assert_eq!(relevance.get(&unrelated_section_id), Some(&1));
+
+    selected_nodes.remove(&chunk_id);
+    let relevance_without_chunk =
+        super::ranking::document_section_relevance(&selected_nodes, &selected_edges);
+    assert_eq!(relevance_without_chunk.get(&section_id), Some(&2));
+}
+
+#[test]
+fn zero_hop_plan_keeps_a_relevant_section_with_its_selected_chunk() -> Result<(), crate::QueryError>
+{
+    let text =
+        "# Recovery\nDurable checkpoints coordinate execution and fencing.\nUnrelated filler.\n";
+    let filler = format!("Unrelated filler {}.\n", "operations ".repeat(1000));
+    let text = text.replacen("Unrelated filler.\n", &filler, 1);
+    let bytes = text.as_bytes().to_vec();
+    let file_id = FileId::derive(&[b"context-document-section-file"]);
+    let content_hash = *blake3::hash(&bytes).as_bytes();
+    let file = FileVersion {
+        file_id,
+        normalized_path: "src/migrations.rs".to_owned(),
+        content_hash,
+        size_bytes: u64::try_from(bytes.len())
+            .map_err(|error| crate::QueryError::Context(error.to_string()))?,
+    };
+    let location = |snippet: &str| -> Result<SourceLocation, crate::QueryError> {
+        let start = text
+            .find(snippet)
+            .ok_or_else(|| crate::QueryError::Context("missing fixture snippet".to_owned()))?;
+        let end = start
+            .checked_add(snippet.len())
+            .ok_or(crate::QueryError::InvalidLimit)?;
+        Ok(SourceLocation {
+            file_id,
+            content_hash,
+            span: SourceSpan {
+                start_byte: u64::try_from(start)
+                    .map_err(|error| crate::QueryError::Context(error.to_string()))?,
+                end_byte: u64::try_from(end)
+                    .map_err(|error| crate::QueryError::Context(error.to_string()))?,
+            },
+        })
+    };
+    let provenance = Provenance {
+        id: ProvenanceId::derive(&[b"context-document-section-provenance"]),
+        producer_namespace: "syntaxmesh.context.fixture".to_owned(),
+        producer_version: "1".to_owned(),
+        evidence_class: EvidenceClass::SourceFact,
+        source: Some(location("# Recovery")?),
+    };
+    let (section_id, chunk_id) = (0_u64..1024)
+        .find_map(|ordinal| {
+            let ordinal_bytes = ordinal.to_le_bytes();
+            let section_id = NodeId::derive(&[b"context-section", &ordinal_bytes]);
+            let chunk_id = NodeId::derive(&[b"context-chunk", &ordinal_bytes]);
+            (chunk_id < section_id).then_some((section_id, chunk_id))
+        })
+        .ok_or(crate::QueryError::InvalidLimit)?;
+    let section = Node {
+        id: section_id,
+        kind: NodeKind::Section,
+        name: "Recovery".to_owned(),
+        owner_file: Some(file_id),
+        source: Some(location("# Recovery")?),
+        provenance: provenance.id,
+        extension_payload: None,
+    };
+    let chunk = Node {
+        id: chunk_id,
+        kind: NodeKind::DocumentChunk,
+        name: "Durable checkpoints coordinate execution and fencing.".to_owned(),
+        owner_file: Some(file_id),
+        source: Some(location(
+            "Durable checkpoints coordinate execution and fencing.",
+        )?),
+        provenance: provenance.id,
+        extension_payload: None,
+    };
+    let filler_node = Node {
+        id: NodeId::derive(&[b"context-filler"]),
+        kind: NodeKind::DocumentChunk,
+        name: filler.trim().to_owned(),
+        owner_file: Some(file_id),
+        source: Some(location(filler.trim_end())?),
+        provenance: provenance.id,
+        extension_payload: None,
+    };
+    let generation = GenerationId::derive(&[b"context-document-section-generation"]);
+    let mut store = InMemoryGraphStore::new();
+    store.apply_delta(GraphDelta {
+        repository: RepositoryId::derive(&[b"context-document-section-repository"]),
+        worktree: WorktreeId::derive(&[b"context-document-section-worktree"]),
+        run_id: IndexRunId::derive(&[b"context-document-section-run"]),
+        expected_base: None,
+        next_generation: generation,
+        changed_files: vec![file],
+        removed_files: Vec::new(),
+        upsert_provenance: vec![provenance.clone()],
+        upsert_nodes: vec![section.clone(), chunk.clone(), filler_node.clone()],
+        upsert_edges: vec![Edge {
+            id: EdgeId::derive(&[b"context-section-contains-chunk"]),
+            source: section.id,
+            target: chunk.id,
+            relation: RelationKind::Contains,
+            provenance: provenance.id,
+            extension_payload: None,
+        }],
+        remove_nodes: Vec::new(),
+        remove_edges: Vec::new(),
+    })?;
+    let query = crate::Query::new(&store, generation);
+    let source = FixtureSource(bytes);
+    let pair_request = ContextRequest {
+        query: "durable checkpoints recovery".to_owned(),
+        seed_nodes: vec![chunk.id, section.id],
+        token_budget: 4096,
+        max_hops: 0,
+        max_candidates: 3,
+    };
+    let pair = query.ranked_plan_context(&pair_request, &source, &ByteCounter)?;
+    let request = ContextRequest {
+        seed_nodes: vec![chunk.id, filler_node.id, section.id],
+        token_budget: pair.token_count.saturating_add(32),
+        ..pair_request
+    };
+    let pack = query.ranked_plan_context(&request, &source, &ByteCounter)?;
+    let source_ids = pack
+        .items
+        .iter()
+        .filter(|item| item.kind == ContextItemKind::SourceEvidence)
+        .flat_map(|item| item.node_ids.iter().copied())
+        .collect::<std::collections::BTreeSet<_>>();
+    if !source_ids.contains(&chunk.id)
+        || !source_ids.contains(&section.id)
+        || source_ids.contains(&filler_node.id)
+    {
+        return Err(crate::QueryError::Context(
+            "zero-hop packing did not retain the selected document heading beside its relevant chunk".to_owned(),
+        ));
+    }
+    Ok(())
 }
 
 #[test]

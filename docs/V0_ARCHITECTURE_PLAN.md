@@ -4021,3 +4021,10 @@ last good materialization intact. The Penelope integration now journals explicit
 sync/rebuild requests and recovers prepared requests after restart behind its
 opt-in `analytics-duckdb` feature; Engine consumers do not pull DuckDB unless a
 host enables that feature ([ADR-0109](adr/0109-duckdb-fact-history-materialization.md)). Injected transaction-failure coverage confirms row and cursor/watermark rollback together. Broader graph-metric/cross-snapshot queries remain open; the materializer remains optional and downstream.
+
+Contract violation history is a bounded read over the retained outcome
+projection. It returns only observed `Contradicted` episodes (`InsufficientEvidence`
+is not a violation), uses a dedicated partial SQLite index, and preserves
+generation-observation temporal claims without replaying canonical history
+([ADR-0394](adr/0394-indexed-contract-violation-history.md)). Lifecycle
+attribution/resolution and automatic scheduling remain separate future work.

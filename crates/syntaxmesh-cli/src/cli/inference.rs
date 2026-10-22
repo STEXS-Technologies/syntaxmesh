@@ -17,6 +17,8 @@ mod outcome_timeline;
 pub(super) use outcome_timeline::outcome_timeline;
 mod contract_history;
 pub(super) use contract_history::contract_history;
+mod violation_history;
+pub(super) use violation_history::violation_history;
 mod catch_up;
 pub(super) use catch_up::catch_up;
 mod sync;

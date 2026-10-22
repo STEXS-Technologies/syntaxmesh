@@ -223,6 +223,41 @@ fn prepare_and_catch_up<S: GraphStore>(
     if mismatched_cursor.status.success() {
         return Err("contract-history CLI accepted a cursor for another contract".into());
     }
+    let violation_command = if command.ends_with("-turso") {
+        "inference-violation-history-turso"
+    } else {
+        "inference-violation-history"
+    };
+    let violations = invoke(&[
+        violation_command,
+        text(canonical)?,
+        text(downstream)?,
+        "target-not-in-concept",
+        "1",
+        "10",
+    ])?;
+    if !violations.status.success() {
+        return Err(String::from_utf8_lossy(&violations.stderr)
+            .into_owned()
+            .into());
+    }
+    let violations: serde_json::Value = serde_json::from_slice(&violations.stdout)?;
+    if violations
+        .get("temporal_claim")
+        .and_then(serde_json::Value::as_str)
+        != Some("contradicted_evaluation_generations_only")
+        || violations
+            .get("items")
+            .and_then(serde_json::Value::as_array)
+            .map(Vec::len)
+            != Some(1)
+        || violations
+            .pointer("/items/0/outcome")
+            .and_then(serde_json::Value::as_str)
+            != Some("Contradicted")
+    {
+        return Err("violation-history CLI did not isolate observed contradictions".into());
+    }
     let as_of_command = if command.ends_with("-turso") {
         "inference-result-as-of-turso"
     } else {

@@ -1048,6 +1048,12 @@ generations that were evaluated and retained. Cursor files are capped at 16
 KiB. See
 [ADR-0390](docs/adr/0390-cli-retained-contract-evaluation-history.md).
 
+`inference-violation-history[-turso]` returns only retained `Contradicted`
+episodes for a contract ID/version; `InsufficientEvidence` is omitted, not
+treated as a violation. Its temporal claim covers observed evaluation
+generations only. The result is read from the indexed downstream projection,
+without canonical-history replay.
+
 Configuration version 1 selects unregistered rule evaluation and remains
 backward-compatible. Version 2 selects ontology-registered inference and adds
 `ontology_definitions`, `registry_entries`, `registry_bytes`, and `bindings`.

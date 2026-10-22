@@ -217,13 +217,39 @@ fn retained_contract_results_are_exact_indexed_and_restart_safe() -> Result<()> 
             worktree,
             contract_id: "target-not-in-concept".to_owned(),
             contract_version: "1".to_owned(),
-            after: first_timeline.next_cursor,
+            after: first_timeline.next_cursor.clone(),
             limit: 2,
         })?;
     if second_timeline.items != [declared_episode.clone(), retracted_episode]
         || second_timeline.next_cursor.is_some()
     {
         return Err("outcome timeline continuation lost transition order".into());
+    }
+    let violations = materializer.contract_violation_timeline(&ContractOutcomeTimelineQuery {
+        repository,
+        worktree,
+        contract_id: "target-not-in-concept".to_owned(),
+        contract_version: "1".to_owned(),
+        after: None,
+        limit: 1,
+    })?;
+    if violations.items != [declared_episode.clone()] || violations.next_cursor.is_some() {
+        return Err(
+            "violation history included an indeterminate result or missed contradiction".into(),
+        );
+    }
+    if materializer
+        .contract_violation_timeline(&ContractOutcomeTimelineQuery {
+            repository,
+            worktree,
+            contract_id: "target-not-in-concept".to_owned(),
+            contract_version: "1".to_owned(),
+            after: first_timeline.next_cursor,
+            limit: 1,
+        })
+        .is_ok()
+    {
+        return Err("violation history accepted a cursor for an indeterminate episode".into());
     }
     if materializer
         .contract_outcome_timeline(&ContractOutcomeTimelineQuery {
@@ -364,12 +390,26 @@ fn retained_contract_results_are_exact_indexed_and_restart_safe() -> Result<()> 
         })?
         .collect::<std::result::Result<Vec<_>, _>>()?
         .join(" ");
+    let violation_plan = materializer
+        .connection
+        .prepare(
+            "EXPLAIN QUERY PLAN SELECT outcome, first_generation, first_sequence, last_generation, last_sequence
+             FROM inference_contract_outcome_episodes WHERE repository = ?1 AND worktree = ?2
+             AND contract_id = ?3 AND contract_version = ?4 AND outcome = 'contradicted'
+             AND (?5 IS NULL OR first_sequence > ?5) ORDER BY first_sequence LIMIT ?6",
+        )?
+        .query_map(rusqlite::params!["", "", "", "", None::<i64>, 2_i64], |row| {
+            row.get::<_, String>(3)
+        })?
+        .collect::<std::result::Result<Vec<_>, _>>()?
+        .join(" ");
     if !point_plan.contains("inference_contract_evaluations_at")
         || !history_plan.contains("inference_contract_evaluations_history")
         || !as_of_plan.contains("inference_contract_evaluations_history")
         || !episode_plan.contains("inference_contract_outcome_episodes_as_of")
+        || !violation_plan.contains("inference_contract_violation_episodes_history")
     {
-        return Err(format!("contract result reads did not use their dedicated temporal indexes: point={point_plan}; history={history_plan}; as_of={as_of_plan}; episode={episode_plan}").into());
+        return Err(format!("contract result reads did not use their dedicated temporal indexes: point={point_plan}; history={history_plan}; as_of={as_of_plan}; episode={episode_plan}; violation={violation_plan}").into());
     }
     let first_page =
         materializer.contract_history(&history_query(repository, worktree, None, 1))?;

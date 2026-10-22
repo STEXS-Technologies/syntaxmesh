@@ -148,6 +148,29 @@ impl InferenceMaterializer {
         &self,
         query: &ContractOutcomeTimelineQuery,
     ) -> Result<ContractOutcomeTimelinePage> {
+        self.contract_outcome_timeline_filtered(query, None)
+    }
+
+    /// Read only observed contradicted episodes from the indexed outcome projection.
+    /// Insufficient evidence is deliberately not classified as a violation.
+    ///
+    /// # Errors
+    /// Rejects invalid bounds, cross-scope cursors, and inconsistent retained rows.
+    pub fn contract_violation_timeline(
+        &self,
+        query: &ContractOutcomeTimelineQuery,
+    ) -> Result<ContractOutcomeTimelinePage> {
+        self.contract_outcome_timeline_filtered(
+            query,
+            Some(syntaxmesh_inference::ContractOutcome::Contradicted),
+        )
+    }
+
+    fn contract_outcome_timeline_filtered(
+        &self,
+        query: &ContractOutcomeTimelineQuery,
+        outcome_filter: Option<syntaxmesh_inference::ContractOutcome>,
+    ) -> Result<ContractOutcomeTimelinePage> {
         if query.limit == 0 || query.limit > 1_000 {
             return Err("invalid contract outcome timeline page limit".into());
         }
@@ -163,13 +186,15 @@ impl InferenceMaterializer {
             let exists: bool = self.connection.query_row(
                 "SELECT EXISTS (SELECT 1 FROM inference_contract_outcome_episodes
                  WHERE repository = ?1 AND worktree = ?2 AND contract_id = ?3
-                   AND contract_version = ?4 AND first_sequence = ?5)",
+                   AND contract_version = ?4 AND first_sequence = ?5
+                   AND (?6 IS NULL OR outcome = ?6))",
                 params![
                     query.repository.0.to_hex(),
                     query.worktree.0.to_hex(),
                     query.contract_id,
                     query.contract_version,
-                    i64::try_from(cursor.first_sequence)?
+                    i64::try_from(cursor.first_sequence)?,
+                    outcome_filter.map(outcome_key)
                 ],
                 |row| row.get(0),
             )?;
@@ -177,13 +202,21 @@ impl InferenceMaterializer {
                 return Err("contract outcome timeline cursor is not a retained position".into());
             }
         }
-        let mut statement = self.connection.prepare(
+        let sql = if outcome_filter.is_some() {
+            "SELECT outcome, first_generation, first_sequence, last_generation, last_sequence
+             FROM inference_contract_outcome_episodes
+             WHERE repository = ?1 AND worktree = ?2 AND contract_id = ?3
+               AND contract_version = ?4 AND outcome = 'contradicted'
+               AND (?5 IS NULL OR first_sequence > ?5)
+             ORDER BY first_sequence LIMIT ?6"
+        } else {
             "SELECT outcome, first_generation, first_sequence, last_generation, last_sequence
              FROM inference_contract_outcome_episodes
              WHERE repository = ?1 AND worktree = ?2 AND contract_id = ?3
                AND contract_version = ?4 AND (?5 IS NULL OR first_sequence > ?5)
-             ORDER BY first_sequence LIMIT ?6",
-        )?;
+             ORDER BY first_sequence LIMIT ?6"
+        };
+        let mut statement = self.connection.prepare(sql)?;
         let mut rows = statement.query(params![
             query.repository.0.to_hex(),
             query.worktree.0.to_hex(),

@@ -1,16 +1,11 @@
-use super::{invoke, text};
+use super::{fixture, invoke, text};
 use std::path::Path;
 use std::result::Result;
 use std::{error::Error, fs};
 use syntaxmesh_core::{GenerationId, NodeId};
-use syntaxmesh_inference::{Limits, Rule};
 use syntaxmesh_inference_sqlite::{ContractHistoryQuery, InferenceMaterializer};
-use syntaxmesh_query::Query;
 use syntaxmesh_store::{FileGraphStore, GraphStore};
 use syntaxmesh_store_turso::TursoGraphStore;
-
-#[path = "../../../syntaxmesh-query/src/service/inference/tests/fixture.rs"]
-mod fixture;
 
 fn write_contracts(path: &Path, version: &str, expectation: &str) -> Result<(), Box<dyn Error>> {
     let configuration = serde_json::json!({
@@ -189,7 +184,42 @@ fn run_authoring_lifecycle(
         after: None,
         limit: 10,
     })?;
+    let omitted_v1_at_replacement = old_history
+        .items
+        .first()
+        .ok_or("missing original version result")?;
+    let replacement_generation = new_history
+        .items
+        .first()
+        .ok_or("missing replacement version result")?;
+    let omitted_episode = materializer.contract_outcome_episode_at(
+        &syntaxmesh_inference_sqlite::ContractOutcomeEpisodeQuery {
+            repository,
+            worktree,
+            evaluation_sequence: replacement_generation.generation_sequence,
+            evaluation_generation: declared,
+            expected_outcome: omitted_v1_at_replacement.evaluation.outcome,
+            contract_id: "target-not-in-concept".to_owned(),
+            contract_version: "1".to_owned(),
+        },
+    )?;
+    let outcome_command = format!("inference-outcome-as-of{command_suffix}");
+    let historical_outcome = invoke(&[
+        outcome_command.as_str(),
+        text(canonical)?,
+        text(downstream)?,
+        &retracted_id,
+        "target-not-in-concept",
+        "1",
+    ])?;
+    if !historical_outcome.status.success() {
+        return Err(String::from_utf8_lossy(&historical_outcome.stderr)
+            .into_owned()
+            .into());
+    }
+    let outcome: serde_json::Value = serde_json::from_slice(&historical_outcome.stdout)?;
     if old_history.items.len() != 1
+        || omitted_episode.is_some()
         || old_history
             .items
             .first()
@@ -208,10 +238,20 @@ fn run_authoring_lifecycle(
             != Some(retracted)
         || new_history.items.get(1).map(|item| item.evaluation.outcome)
             != Some(syntaxmesh_inference::ContractOutcome::InsufficientEvidence)
+        || outcome.get("freshness").and_then(serde_json::Value::as_str) != Some("stale")
+        || outcome
+            .get("outcome_episode")
+            .and_then(|episode| episode.get("first_generation"))
+            != Some(&serde_json::to_value(first)?)
+        || outcome
+            .get("temporal_claim")
+            .and_then(serde_json::Value::as_str)
+            != Some("observed_evaluation_generations_only")
     {
-        return Err(
-            "later authored contract set did not replace only the catch-up baseline".into(),
-        );
+        return Err(format!(
+            "later authored contract set did not replace only the catch-up baseline: {outcome}"
+        )
+        .into());
     }
     Ok(())
 }

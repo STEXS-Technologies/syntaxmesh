@@ -11,7 +11,8 @@ mod test_fixture;
 
 pub use contract_history::{
     ContractHistoryCursor, ContractHistoryPage, ContractHistoryQuery, ContractHistoryRequest,
-    ContractHistoryWatermark, RetainedContractEvaluation, RetainedContractSet,
+    ContractHistoryWatermark, ContractOutcomeEpisode, ContractOutcomeEpisodeQuery,
+    RetainedContractEvaluation, RetainedContractSet,
 };
 pub use lifecycle::{ClaimLifecycle, ClosureReason, LifecycleReceipt, LifecycleRequest};
 pub use materializer::{InferenceMaterializer, RebuildRequest, Result, Watermark};

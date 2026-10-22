@@ -151,7 +151,9 @@ pub(super) fn load(path: &Path) -> Result<Configuration, CliError> {
     let mut bytes = Vec::new();
     file.take(MAX_BYTES.saturating_add(1))
         .read_to_end(&mut bytes)?;
-    if u64::try_from(bytes.len()).map_err(|_| invalid("configuration size overflow"))? > MAX_BYTES {
+    if u64::try_from(bytes.len()).map_err(|_error| invalid("configuration size overflow"))?
+        > MAX_BYTES
+    {
         return Err(invalid("contract configuration exceeds 1 MiB"));
     }
     let config: Configuration = serde_json::from_slice(&bytes).map_err(CliError::Encode)?;

@@ -30,7 +30,7 @@ mod integrity;
 #[cfg(feature = "inference-sqlite")]
 pub use inference::{
     ContractHistoryAdvanceReceipt, ContractHistoryAdvanceRequest, ContractHistoryRetainRequest,
-    ContractResultAsOf, InferenceRecovery,
+    ContractOutcomeAsOf, ContractResultAsOf, InferenceRecovery,
 };
 mod semantic;
 #[cfg(test)]

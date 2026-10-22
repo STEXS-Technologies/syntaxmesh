@@ -151,6 +151,67 @@ fn retained_contract_results_are_exact_indexed_and_restart_safe() -> Result<()> 
     {
         return Err("materialized history did not preserve generation-scoped outcomes".into());
     }
+    let first_episode = materializer
+        .contract_outcome_episode_at(&ContractOutcomeEpisodeQuery {
+            repository,
+            worktree,
+            evaluation_sequence: first_result.generation_sequence,
+            evaluation_generation: first,
+            expected_outcome: first_result.evaluation.outcome,
+            contract_id: "target-not-in-concept".to_owned(),
+            contract_version: "1".to_owned(),
+        })?
+        .ok_or("missing first outcome episode")?;
+    let declared_episode = materializer
+        .contract_outcome_episode_at(&ContractOutcomeEpisodeQuery {
+            repository,
+            worktree,
+            evaluation_sequence: declared_result.generation_sequence,
+            evaluation_generation: declared,
+            expected_outcome: declared_result.evaluation.outcome,
+            contract_id: "target-not-in-concept".to_owned(),
+            contract_version: "1".to_owned(),
+        })?
+        .ok_or("missing contradicted outcome episode")?;
+    let retracted_episode = materializer
+        .contract_outcome_episode_at(&ContractOutcomeEpisodeQuery {
+            repository,
+            worktree,
+            evaluation_sequence: retracted_result.generation_sequence,
+            evaluation_generation: retracted_generation,
+            expected_outcome: retracted_result.evaluation.outcome,
+            contract_id: "target-not-in-concept".to_owned(),
+            contract_version: "1".to_owned(),
+        })?
+        .ok_or("missing restored indeterminate outcome episode")?;
+    if first_episode.outcome != ContractOutcome::InsufficientEvidence
+        || first_episode.first_generation != first
+        || first_episode.last_generation != first
+        || declared_episode.outcome != ContractOutcome::Contradicted
+        || declared_episode.first_generation != declared
+        || retracted_episode.outcome != ContractOutcome::InsufficientEvidence
+        || retracted_episode.first_generation != retracted_generation
+    {
+        return Err("outcome episodes did not retain observed transition boundaries".into());
+    }
+    materializer
+        .connection
+        .execute("DELETE FROM inference_contract_outcome_episodes", [])?;
+    InferenceMaterializer::backfill_outcome_episodes(&materializer.connection)?;
+    let backfilled_episode = materializer
+        .contract_outcome_episode_at(&ContractOutcomeEpisodeQuery {
+            repository,
+            worktree,
+            evaluation_sequence: declared_result.generation_sequence,
+            evaluation_generation: declared,
+            expected_outcome: declared_result.evaluation.outcome,
+            contract_id: "target-not-in-concept".to_owned(),
+            contract_version: "1".to_owned(),
+        })?
+        .ok_or("migration backfill omitted a retained outcome episode")?;
+    if backfilled_episode != declared_episode {
+        return Err("outcome episode migration backfill differs from live projection".into());
+    }
     let before_first = materializer.contract_result_at_or_before(
         repository,
         worktree,
@@ -239,11 +300,26 @@ fn retained_contract_results_are_exact_indexed_and_restart_safe() -> Result<()> 
         )?
         .collect::<std::result::Result<Vec<_>, _>>()?
         .join(" ");
+    let episode_plan = materializer
+        .connection
+        .prepare(
+            "EXPLAIN QUERY PLAN SELECT outcome, first_generation, first_sequence, ended_sequence
+             FROM inference_contract_outcome_episodes WHERE repository = ?1 AND worktree = ?2
+             AND contract_id = ?3 AND contract_version = ?4 AND first_sequence <= ?5
+             AND (ended_sequence IS NULL OR ended_sequence > ?5)
+             ORDER BY first_sequence DESC LIMIT 1",
+        )?
+        .query_map(rusqlite::params!["", "", "", "", 1_i64], |row| {
+            row.get::<_, String>(3)
+        })?
+        .collect::<std::result::Result<Vec<_>, _>>()?
+        .join(" ");
     if !point_plan.contains("inference_contract_evaluations_at")
         || !history_plan.contains("inference_contract_evaluations_history")
         || !as_of_plan.contains("inference_contract_evaluations_history")
+        || !episode_plan.contains("inference_contract_outcome_episodes_as_of")
     {
-        return Err(format!("contract result reads did not use their dedicated temporal indexes: point={point_plan}; history={history_plan}; as_of={as_of_plan}").into());
+        return Err(format!("contract result reads did not use their dedicated temporal indexes: point={point_plan}; history={history_plan}; as_of={as_of_plan}; episode={episode_plan}").into());
     }
     let first_page =
         materializer.contract_history(&history_query(repository, worktree, None, 1))?;
@@ -358,6 +434,110 @@ fn retained_contract_results_are_exact_indexed_and_restart_safe() -> Result<()> 
     )?;
     if reopened.latest_contract_set(repository, worktree).is_ok() {
         return Err("tampered latest contract set passed aggregate integrity validation".into());
+    }
+    Ok(())
+}
+
+#[test]
+fn outcome_episodes_restart_after_omission_and_backfill_from_complete_sets() -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    let path = directory
+        .path()
+        .join("outcome-episode-reintroduction.sqlite");
+    InferenceMaterializer::migrate(&path)?;
+    let mut materializer = InferenceMaterializer::open(&path)?;
+    let mut store = InMemoryGraphStore::new();
+    let (_rule, declared, retracted) = test_fixture::fixture(&mut store)?;
+    let first = store
+        .manifest(declared)?
+        .parent
+        .ok_or("fixture has no baseline generation")?;
+    let contracts = contracts();
+    let replacement = [contracts[0].clone()];
+    let initial =
+        materializer.retain_contract_history(&store, &request(first, &contracts, 16_384))?;
+    let omitted =
+        materializer.retain_contract_history(&store, &request(declared, &replacement, 16_384))?;
+    materializer.retain_contract_history(&store, &request(retracted, &contracts, 16_384))?;
+    let prior = materializer
+        .contract_result_at(
+            initial.repository,
+            initial.worktree,
+            first,
+            "target-not-in-concept",
+            "1",
+        )?
+        .ok_or("missing pre-omission result")?;
+    let prior_episode = materializer
+        .contract_outcome_episode_at(&ContractOutcomeEpisodeQuery {
+            repository: initial.repository,
+            worktree: initial.worktree,
+            evaluation_sequence: prior.generation_sequence,
+            evaluation_generation: first,
+            expected_outcome: prior.evaluation.outcome,
+            contract_id: "target-not-in-concept".to_owned(),
+            contract_version: "1".to_owned(),
+        })?
+        .ok_or("missing pre-omission episode")?;
+    if materializer
+        .contract_outcome_episode_at(&ContractOutcomeEpisodeQuery {
+            repository: initial.repository,
+            worktree: initial.worktree,
+            evaluation_sequence: omitted.generation_sequence,
+            evaluation_generation: declared,
+            expected_outcome: prior.evaluation.outcome,
+            contract_id: "target-not-in-concept".to_owned(),
+            contract_version: "1".to_owned(),
+        })?
+        .is_some()
+    {
+        return Err("omitted contract outcome episode remained open".into());
+    }
+    let reintroduced = materializer
+        .contract_result_at(
+            initial.repository,
+            initial.worktree,
+            retracted,
+            "target-not-in-concept",
+            "1",
+        )?
+        .ok_or("missing reintroduced result")?;
+    let reintroduced_episode = materializer
+        .contract_outcome_episode_at(&ContractOutcomeEpisodeQuery {
+            repository: initial.repository,
+            worktree: initial.worktree,
+            evaluation_sequence: reintroduced.generation_sequence,
+            evaluation_generation: retracted,
+            expected_outcome: reintroduced.evaluation.outcome,
+            contract_id: "target-not-in-concept".to_owned(),
+            contract_version: "1".to_owned(),
+        })?
+        .ok_or("missing reintroduced episode")?;
+    if prior_episode.first_generation != first
+        || reintroduced_episode.first_generation != retracted
+        || reintroduced_episode.outcome != prior_episode.outcome
+    {
+        return Err("contract reintroduction did not begin a distinct observed episode".into());
+    }
+    materializer
+        .connection
+        .execute("DELETE FROM inference_contract_outcome_episodes", [])?;
+    InferenceMaterializer::backfill_outcome_episodes(&materializer.connection)?;
+    let backfilled = materializer
+        .contract_outcome_episode_at(&ContractOutcomeEpisodeQuery {
+            repository: initial.repository,
+            worktree: initial.worktree,
+            evaluation_sequence: reintroduced.generation_sequence,
+            evaluation_generation: retracted,
+            expected_outcome: reintroduced.evaluation.outcome,
+            contract_id: "target-not-in-concept".to_owned(),
+            contract_version: "1".to_owned(),
+        })?
+        .ok_or("migration backfill omitted the reintroduced episode")?;
+    if backfilled != reintroduced_episode {
+        return Err(
+            "migration backfill did not preserve omission/reintroduction boundaries".into(),
+        );
     }
     Ok(())
 }

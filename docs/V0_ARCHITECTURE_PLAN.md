@@ -264,6 +264,19 @@ policy or run automatically on publication. Explicit deprecation status,
 publication-time scheduling, richer drift analysis, and the broader v0–v5
 acceptance gates remain open. Full-CI evidence is recorded in the ADR.
 
+[ADR-0385](adr/0385-indexed-contract-outcome-episodes.md) adds a compact,
+indexed downstream projection grouping same-outcome retained contract
+evaluations into observed episodes. A SQLite migration backfills existing
+results; publication updates episodes atomically, closes episodes for contracts
+omitted by a replacement set, and starts a new episode on reintroduction or an
+outcome transition. The new Engine/CLI as-of summary reports the latest result
+and its first/last same-outcome evaluation, while preserving `current`, `stale`,
+and `unavailable` freshness. It does not infer compliance or wall-clock duration
+between evaluated generations. Focused migration, query-plan, SQLite, Engine,
+and inference CLI suites pass. Full `cargo make ci` passed in 154.00 seconds on
+2026-10-22 with DuckDB excluded. Complete v2 temporal drift lifecycle and broad
+v0–v5 acceptance remain open.
+
 After this retrieval and target-discovery change, `cargo make ci` passed in
 184.40 seconds on 2026-10-22. It covered workspace formatting, architecture,
 extension isolation, migration registries, instrumented/default checks, audit

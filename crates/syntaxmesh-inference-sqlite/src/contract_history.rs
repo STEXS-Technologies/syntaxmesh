@@ -1,6 +1,7 @@
 use crate::{InferenceMaterializer, Result};
 use rusqlite::{OptionalExtension, params};
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeSet;
 use syntaxmesh_core::{GenerationId, RepositoryId, StableId, WorktreeId};
 use syntaxmesh_inference::{Contract, ContractEvaluation, ContractLimits};
 use syntaxmesh_query::Query;
@@ -41,6 +42,42 @@ pub struct RetainedContractSet {
     pub contracts: Vec<Contract>,
 }
 
+/// Compact run of one outcome across retained evaluations for a contract version.
+/// These are observation bounds, not a claim about unevaluated generations.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ContractOutcomeEpisode {
+    pub contract_id: String,
+    pub contract_version: String,
+    pub outcome: syntaxmesh_inference::ContractOutcome,
+    pub first_generation: GenerationId,
+    pub first_sequence: u64,
+    pub last_generation: GenerationId,
+    pub last_sequence: u64,
+}
+
+/// Select an outcome episode using the exact coordinates of a retained evaluation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ContractOutcomeEpisodeQuery {
+    pub repository: RepositoryId,
+    pub worktree: WorktreeId,
+    pub evaluation_sequence: u64,
+    pub evaluation_generation: GenerationId,
+    pub expected_outcome: syntaxmesh_inference::ContractOutcome,
+    pub contract_id: String,
+    pub contract_version: String,
+}
+
+#[derive(Clone, Copy)]
+struct OutcomeEpisodeAdvance<'request> {
+    repository: &'request str,
+    worktree: &'request str,
+    contract_id: &'request str,
+    contract_version: &'request str,
+    outcome: &'request str,
+    generation: &'request str,
+    sequence: i64,
+}
+
 /// Keyset cursor for one contract's chronological result history.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ContractHistoryCursor {
@@ -71,6 +108,140 @@ pub struct ContractHistoryPage {
 }
 
 impl InferenceMaterializer {
+    /// Backfill the compact outcome projection while applying migration 7.
+    pub(crate) fn backfill_outcome_episodes(connection: &rusqlite::Connection) -> Result<()> {
+        let mut sets_statement = connection.prepare(
+            "SELECT repository, worktree, operation, generation, generation_sequence,
+                    contract_count, payload_digest
+             FROM inference_contract_evaluation_sets
+             ORDER BY repository, worktree, generation_sequence, generation",
+        )?;
+        let sets = sets_statement
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, i64>(4)?,
+                    row.get::<_, i64>(5)?,
+                    row.get::<_, String>(6)?,
+                ))
+            })?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        drop(sets_statement);
+        for (
+            repository,
+            worktree,
+            operation,
+            generation,
+            sequence,
+            expected_count,
+            expected_digest,
+        ) in sets
+        {
+            let peers: i64 = connection.query_row(
+                "SELECT COUNT(*) FROM inference_contract_evaluation_sets
+                 WHERE repository = ?1 AND worktree = ?2 AND generation_sequence = ?3",
+                rusqlite::params![repository, worktree, sequence],
+                |row| row.get(0),
+            )?;
+            if peers != 1 {
+                return Err(
+                    "cannot backfill outcome episodes from ambiguous retained contract sets".into(),
+                );
+            }
+            let mut rows_statement = connection.prepare(
+                "SELECT contract_id, contract_version, evaluation_id, payload, payload_digest,
+                        generation, generation_sequence
+                 FROM inference_contract_evaluations WHERE operation = ?1
+                 ORDER BY contract_id, contract_version",
+            )?;
+            let rows = rows_statement
+                .query_map([&operation], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, Vec<u8>>(3)?,
+                        row.get::<_, String>(4)?,
+                        row.get::<_, String>(5)?,
+                        row.get::<_, i64>(6)?,
+                    ))
+                })?
+                .collect::<std::result::Result<Vec<_>, _>>()?;
+            drop(rows_statement);
+            if i64::try_from(rows.len())? != expected_count {
+                return Err("contract outcome backfill found an incomplete retained set".into());
+            }
+            let mut digest_entries = Vec::with_capacity(rows.len());
+            let mut decoded = Vec::with_capacity(rows.len());
+            for (
+                contract_id,
+                contract_version,
+                evaluation_id,
+                payload,
+                digest,
+                row_generation,
+                row_sequence,
+            ) in rows
+            {
+                let retained = decode_payload(sequence, &payload, &digest)?;
+                if retained.contract.id != contract_id
+                    || retained.contract.version != contract_version
+                    || retained.evaluation.generation != parse_generation(&generation)?
+                    || row_generation != generation
+                    || row_sequence != sequence
+                    || retained.evaluation.id.to_hex() != evaluation_id
+                {
+                    return Err(
+                        "contract outcome backfill identity differs from retained row".into(),
+                    );
+                }
+                digest_entries.push((
+                    contract_id.clone(),
+                    contract_version.clone(),
+                    retained.evaluation.id,
+                    blake3::hash(&payload).to_hex().to_string(),
+                ));
+                decoded.push((contract_id, contract_version, retained));
+            }
+            let digest_bytes = bincode::serialize(&digest_entries)?;
+            if blake3::hash(&digest_bytes).to_hex().as_str() != expected_digest {
+                return Err("contract outcome backfill set checksum mismatch".into());
+            }
+            let active = decoded
+                .iter()
+                .map(|(contract_id, contract_version, _)| {
+                    (contract_id.clone(), contract_version.clone())
+                })
+                .collect::<BTreeSet<_>>();
+            close_omitted_episodes(
+                connection,
+                &repository,
+                &worktree,
+                &generation,
+                sequence,
+                &active,
+            )?;
+            for (contract_id, contract_version, retained) in decoded {
+                advance_outcome_episode(
+                    connection,
+                    OutcomeEpisodeAdvance {
+                        repository: &repository,
+                        worktree: &worktree,
+                        contract_id: &contract_id,
+                        contract_version: &contract_version,
+                        outcome: outcome_key(retained.evaluation.outcome),
+                        generation: &generation,
+                        sequence,
+                    },
+                )?;
+            }
+        }
+        Ok(())
+    }
+
     /// Evaluate and atomically retain one complete contract batch for a pinned generation.
     ///
     /// This downstream projection is independent of canonical graph publication.
@@ -85,8 +256,11 @@ impl InferenceMaterializer {
         store: &S,
         request: &ContractHistoryRequest<'_>,
     ) -> Result<ContractHistoryWatermark> {
-        if request.history_scan_budget == 0 || request.output_bytes == 0 {
-            return Err("positive contract history and output budgets required".into());
+        if request.contracts.is_empty()
+            || request.history_scan_budget == 0
+            || request.output_bytes == 0
+        {
+            return Err("non-empty contracts and positive history/output budgets required".into());
         }
         let manifest = store.manifest(request.generation)?;
         let sequence = store.generation_sequence(request.generation)?;
@@ -346,6 +520,106 @@ impl InferenceMaterializer {
         .transpose()
     }
 
+    /// Read the compact outcome episode containing one retained evaluation.
+    ///
+    /// `evaluation_sequence` must be the sequence of the latest retained result
+    /// selected for the requested as-of generation, not the target sequence.
+    ///
+    /// # Errors
+    /// Rejects invalid bounds or episode rows that disagree with retained results.
+    pub fn contract_outcome_episode_at(
+        &self,
+        query: &ContractOutcomeEpisodeQuery,
+    ) -> Result<Option<ContractOutcomeEpisode>> {
+        let row = self
+            .connection
+            .query_row(
+                "SELECT outcome, first_generation, first_sequence, last_generation, last_sequence,
+                        ended_sequence
+             FROM inference_contract_outcome_episodes
+             WHERE repository = ?1 AND worktree = ?2 AND contract_id = ?3
+               AND contract_version = ?4 AND first_sequence <= ?5
+               AND (ended_sequence IS NULL OR ended_sequence > ?5)
+             ORDER BY first_sequence DESC LIMIT 1",
+                rusqlite::params![
+                    query.repository.0.to_hex(),
+                    query.worktree.0.to_hex(),
+                    query.contract_id,
+                    query.contract_version,
+                    i64::try_from(query.evaluation_sequence)?
+                ],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, i64>(2)?,
+                        row.get::<_, String>(3)?,
+                        row.get::<_, i64>(4)?,
+                        row.get::<_, Option<i64>>(5)?,
+                    ))
+                },
+            )
+            .optional()?;
+        row.map(
+            |(
+                outcome,
+                first_generation,
+                first_sequence,
+                last_generation,
+                last_sequence,
+                ended_sequence,
+            )| {
+                let outcome = parse_outcome(&outcome)?;
+                let first_sequence = u64::try_from(first_sequence)?;
+                let stored_last_sequence = u64::try_from(last_sequence)?;
+                if first_sequence > query.evaluation_sequence
+                    || stored_last_sequence < query.evaluation_sequence
+                    || ended_sequence.is_some_and(|ended| {
+                        u64::try_from(ended).is_ok_and(|value| value <= query.evaluation_sequence)
+                    })
+                    || outcome != query.expected_outcome
+                {
+                    return Err(
+                        "contract outcome episode bounds do not contain selected evaluation".into(),
+                    );
+                }
+                let first_generation = parse_generation(&first_generation)?;
+                let last_generation = parse_generation(&last_generation)?;
+                for (generation, sequence) in [
+                    (first_generation, first_sequence),
+                    (last_generation, stored_last_sequence),
+                ] {
+                    let retained = self
+                        .contract_result_at(
+                            query.repository,
+                            query.worktree,
+                            generation,
+                            &query.contract_id,
+                            &query.contract_version,
+                        )?
+                        .ok_or("contract outcome episode boundary has no retained result")?;
+                    if retained.generation_sequence != sequence
+                        || retained.evaluation.outcome != outcome
+                    {
+                        return Err(
+                            "contract outcome episode boundary differs from retained result".into(),
+                        );
+                    }
+                }
+                Ok(ContractOutcomeEpisode {
+                    contract_id: query.contract_id.clone(),
+                    contract_version: query.contract_version.clone(),
+                    outcome,
+                    first_generation,
+                    first_sequence,
+                    last_generation: query.evaluation_generation,
+                    last_sequence: query.evaluation_sequence,
+                })
+            },
+        )
+        .transpose()
+    }
+
     /// Read a bounded chronological page for one stable contract identity/version.
     ///
     /// # Errors
@@ -502,14 +776,173 @@ impl InferenceMaterializer {
                 digest
             ],
         )?;
+        let active = payloads
+            .iter()
+            .map(|(contract_id, contract_version, _, _)| {
+                (contract_id.clone(), contract_version.clone())
+            })
+            .collect::<BTreeSet<_>>();
+        close_omitted_episodes(
+            &transaction,
+            &watermark.repository.0.to_hex(),
+            &watermark.worktree.0.to_hex(),
+            &watermark.generation.0.to_hex(),
+            i64::try_from(watermark.generation_sequence)?,
+            &active,
+        )?;
         for (contract_id, contract_version, evaluation, payload) in payloads {
             transaction.execute(
                 "INSERT INTO inference_contract_evaluations VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
                 params![operation, watermark.repository.0.to_hex(), watermark.worktree.0.to_hex(), watermark.generation.0.to_hex(), i64::try_from(watermark.generation_sequence)?, contract_id, contract_version, evaluation.id.to_hex(), payload, blake3::hash(payload).to_hex().to_string()],
             )?;
+            advance_outcome_episode(
+                &transaction,
+                OutcomeEpisodeAdvance {
+                    repository: &watermark.repository.0.to_hex(),
+                    worktree: &watermark.worktree.0.to_hex(),
+                    contract_id,
+                    contract_version,
+                    outcome: outcome_key(evaluation.outcome),
+                    generation: &watermark.generation.0.to_hex(),
+                    sequence: i64::try_from(watermark.generation_sequence)?,
+                },
+            )?;
         }
         transaction.commit()?;
         Ok(())
+    }
+}
+
+fn close_omitted_episodes(
+    connection: &rusqlite::Connection,
+    repository: &str,
+    worktree: &str,
+    generation: &str,
+    sequence: i64,
+    active: &BTreeSet<(String, String)>,
+) -> Result<()> {
+    let mut statement = connection.prepare(
+        "SELECT contract_id, contract_version FROM inference_contract_outcome_episodes
+         WHERE repository = ?1 AND worktree = ?2 AND ended_sequence IS NULL",
+    )?;
+    let open = statement
+        .query_map([repository, worktree], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })?
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+    drop(statement);
+    for (contract_id, contract_version) in open {
+        if !active.contains(&(contract_id.clone(), contract_version.clone())) {
+            connection.execute(
+                "UPDATE inference_contract_outcome_episodes
+                 SET ended_generation = ?5, ended_sequence = ?6
+                 WHERE repository = ?1 AND worktree = ?2 AND contract_id = ?3
+                   AND contract_version = ?4 AND ended_sequence IS NULL",
+                rusqlite::params![
+                    repository,
+                    worktree,
+                    contract_id,
+                    contract_version,
+                    generation,
+                    sequence
+                ],
+            )?;
+        }
+    }
+    Ok(())
+}
+
+fn advance_outcome_episode(
+    connection: &rusqlite::Connection,
+    advance: OutcomeEpisodeAdvance<'_>,
+) -> Result<()> {
+    let OutcomeEpisodeAdvance {
+        repository,
+        worktree,
+        contract_id,
+        contract_version,
+        outcome,
+        generation,
+        sequence,
+    } = advance;
+    let latest: Option<(String, i64)> = connection
+        .query_row(
+            "SELECT outcome, last_sequence FROM inference_contract_outcome_episodes
+             WHERE repository = ?1 AND worktree = ?2 AND contract_id = ?3
+               AND contract_version = ?4 AND ended_sequence IS NULL
+             ORDER BY first_sequence DESC LIMIT 1",
+            rusqlite::params![repository, worktree, contract_id, contract_version],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()?;
+    if let Some((latest_outcome, last_sequence)) = latest {
+        if last_sequence >= sequence {
+            return Err("contract outcome episodes must advance by generation sequence".into());
+        }
+        if latest_outcome == outcome {
+            connection.execute(
+                "UPDATE inference_contract_outcome_episodes
+                 SET last_generation = ?5, last_sequence = ?6
+                 WHERE repository = ?1 AND worktree = ?2 AND contract_id = ?3
+                   AND contract_version = ?4 AND ended_sequence IS NULL",
+                rusqlite::params![
+                    repository,
+                    worktree,
+                    contract_id,
+                    contract_version,
+                    generation,
+                    sequence
+                ],
+            )?;
+            return Ok(());
+        }
+        connection.execute(
+            "UPDATE inference_contract_outcome_episodes
+             SET ended_generation = ?5, ended_sequence = ?6
+             WHERE repository = ?1 AND worktree = ?2 AND contract_id = ?3
+               AND contract_version = ?4 AND ended_sequence IS NULL",
+            rusqlite::params![
+                repository,
+                worktree,
+                contract_id,
+                contract_version,
+                generation,
+                sequence
+            ],
+        )?;
+    }
+    connection.execute(
+        "INSERT INTO inference_contract_outcome_episodes (
+            repository, worktree, contract_id, contract_version, outcome,
+            first_generation, first_sequence, last_generation, last_sequence
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?6, ?7)",
+        rusqlite::params![
+            repository,
+            worktree,
+            contract_id,
+            contract_version,
+            outcome,
+            generation,
+            sequence
+        ],
+    )?;
+    Ok(())
+}
+
+const fn outcome_key(outcome: syntaxmesh_inference::ContractOutcome) -> &'static str {
+    match outcome {
+        syntaxmesh_inference::ContractOutcome::Supported => "supported",
+        syntaxmesh_inference::ContractOutcome::Contradicted => "contradicted",
+        syntaxmesh_inference::ContractOutcome::InsufficientEvidence => "insufficient_evidence",
+    }
+}
+
+fn parse_outcome(value: &str) -> Result<syntaxmesh_inference::ContractOutcome> {
+    match value {
+        "supported" => Ok(syntaxmesh_inference::ContractOutcome::Supported),
+        "contradicted" => Ok(syntaxmesh_inference::ContractOutcome::Contradicted),
+        "insufficient_evidence" => Ok(syntaxmesh_inference::ContractOutcome::InsufficientEvidence),
+        _ => Err("unknown retained contract outcome episode".into()),
     }
 }
 

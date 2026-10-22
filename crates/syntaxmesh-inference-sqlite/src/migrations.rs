@@ -46,6 +46,12 @@ const MIGRATIONS: &[Migration] = &[
         sql: include_str!("../migrations/0006_contract_result_history.up.sql"),
         backfill: None,
     },
+    Migration {
+        version: 7,
+        name: "contract_outcome_episodes",
+        sql: include_str!("../migrations/0007_contract_outcome_episodes.up.sql"),
+        backfill: Some(crate::InferenceMaterializer::backfill_outcome_episodes),
+    },
 ];
 
 pub(crate) fn migrate(path: &Path) -> Result<()> {
@@ -146,6 +152,8 @@ fn validate_version(connection: &Connection, version: i64) -> Result<()> {
 mod tests;
 #[cfg(test)]
 mod tests_contract_history;
+#[cfg(test)]
+mod tests_outcome_episodes;
 #[cfg(test)]
 mod tests_receipts;
 #[cfg(test)]

@@ -25,6 +25,44 @@ fn configuration() -> serde_json::Value {
     })
 }
 
+fn set_field(
+    root: &mut serde_json::Value,
+    field: &str,
+    value: serde_json::Value,
+) -> Result<(), CliError> {
+    root.as_object_mut()
+        .ok_or_else(|| invalid("test configuration is not an object"))?
+        .insert(field.to_owned(), value);
+    Ok(())
+}
+
+fn set_nested_field(
+    root: &mut serde_json::Value,
+    parent: &str,
+    field: &str,
+    value: serde_json::Value,
+) -> Result<(), CliError> {
+    root.get_mut(parent)
+        .and_then(serde_json::Value::as_object_mut)
+        .ok_or_else(|| invalid("test configuration parent is not an object"))?
+        .insert(field.to_owned(), value);
+    Ok(())
+}
+
+fn set_first_contract_field(
+    root: &mut serde_json::Value,
+    field: &str,
+    value: serde_json::Value,
+) -> Result<(), CliError> {
+    root.get_mut("contracts")
+        .and_then(serde_json::Value::as_array_mut)
+        .and_then(|contracts| contracts.first_mut())
+        .and_then(serde_json::Value::as_object_mut)
+        .ok_or_else(|| invalid("test configuration has no contract object"))?
+        .insert(field.to_owned(), value);
+    Ok(())
+}
+
 fn load_value(value: &serde_json::Value) -> Result<Configuration, CliError> {
     let directory = tempfile::tempdir()?;
     let path = directory.path().join("contracts.json");
@@ -57,13 +95,13 @@ fn versioned_contract_file_maps_hex_ids_and_typed_relation() -> Result<(), CliEr
 #[test]
 fn invalid_versions_unknown_fields_and_exhausted_bounds_reject() -> Result<(), CliError> {
     let mut unsupported = configuration();
-    unsupported["version"] = serde_json::json!(2);
+    set_field(&mut unsupported, "version", serde_json::json!(2))?;
     if load_value(&unsupported).is_ok() {
         return Err(invalid("unsupported contract config version was accepted"));
     }
 
     let mut unknown = configuration();
-    unknown["unexpected"] = serde_json::json!(true);
+    set_field(&mut unknown, "unexpected", serde_json::json!(true))?;
     if load_value(&unknown).is_ok() {
         return Err(invalid(
             "unknown top-level contract config field was accepted",
@@ -71,13 +109,18 @@ fn invalid_versions_unknown_fields_and_exhausted_bounds_reject() -> Result<(), C
     }
 
     let mut exhausted = configuration();
-    exhausted["limits"]["edge_visits"] = serde_json::json!(0);
+    set_nested_field(
+        &mut exhausted,
+        "limits",
+        "edge_visits",
+        serde_json::json!(0),
+    )?;
     if load_value(&exhausted).is_ok() {
         return Err(invalid("zero contract work budget was accepted"));
     }
 
     let mut empty = configuration();
-    empty["contracts"] = serde_json::json!([]);
+    set_field(&mut empty, "contracts", serde_json::json!([]))?;
     if load_value(&empty).is_ok() {
         return Err(invalid("empty authored contract set was accepted"));
     }
@@ -87,7 +130,7 @@ fn invalid_versions_unknown_fields_and_exhausted_bounds_reject() -> Result<(), C
 #[test]
 fn invalid_node_identity_rejects_before_store_access() -> Result<(), CliError> {
     let mut malformed = configuration();
-    malformed["contracts"][0]["source"] = serde_json::json!("not-a-node-id");
+    set_first_contract_field(&mut malformed, "source", serde_json::json!("not-a-node-id"))?;
     if load_value(&malformed)?.contracts().is_ok() {
         return Err(invalid("malformed contract node identity was accepted"));
     }

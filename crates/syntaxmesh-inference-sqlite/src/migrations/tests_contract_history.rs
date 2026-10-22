@@ -9,11 +9,13 @@ fn v5_to_v6_contract_history_migration_is_explicit_and_atomic() -> Result<()> {
     InferenceMaterializer::migrate(&path)?;
     let connection = Connection::open(&path)?;
     connection.execute_batch(
-        "DROP INDEX inference_contract_evaluations_at;
+        "DROP INDEX inference_contract_outcome_episodes_as_of;
+         DROP TABLE inference_contract_outcome_episodes;
+         DROP INDEX inference_contract_evaluations_at;
          DROP INDEX inference_contract_evaluations_history;
          DROP TABLE inference_contract_evaluations;
          DROP TABLE inference_contract_evaluation_sets;
-         DELETE FROM inference_migrations WHERE version = 6;
+         DELETE FROM inference_migrations WHERE version >= 6;
          PRAGMA user_version = 5;",
     )?;
     if open(&path).is_ok() {

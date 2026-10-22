@@ -1,18 +1,12 @@
-use super::{invoke, text};
+use super::{fixture, invoke, text};
 use std::path::Path;
 use std::result::Result;
 use std::{error::Error, path::PathBuf};
 use syntaxmesh_core::{NodeId, RelationKind};
-use syntaxmesh_inference::{
-    Contract, ContractLimits, ContractOrigin, Limits, RelationExpectation, Rule,
-};
+use syntaxmesh_inference::{Contract, ContractLimits, ContractOrigin, RelationExpectation};
 use syntaxmesh_inference_sqlite::{ContractHistoryRequest, InferenceMaterializer};
-use syntaxmesh_query::Query;
 use syntaxmesh_store::{FileGraphStore, GraphStore};
 use syntaxmesh_store_turso::TursoGraphStore;
-
-#[path = "../../../syntaxmesh-query/src/service/inference/tests/fixture.rs"]
-mod fixture;
 
 fn prepare_and_catch_up<S: GraphStore>(
     mut store: S,

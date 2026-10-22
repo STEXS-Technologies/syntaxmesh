@@ -2,9 +2,9 @@ use super::{EngineError, SyntaxMeshEngine};
 use std::path::Path;
 use syntaxmesh_inference::{ContractLimits, OntologyDefinition, RegisteredInferenceAdmission};
 use syntaxmesh_inference_sqlite::{
-    ContractHistoryPage, ContractHistoryQuery, ContractHistoryWatermark, InferenceMaterializer,
-    RebuildRequest, RetainedContractEvaluation, RetainedContractSet, StreamCheckpoint,
-    StreamOrigin, StreamSyncRequest,
+    ContractHistoryPage, ContractHistoryQuery, ContractHistoryWatermark, ContractOutcomeEpisode,
+    ContractOutcomeEpisodeQuery, InferenceMaterializer, RebuildRequest, RetainedContractEvaluation,
+    RetainedContractSet, StreamCheckpoint, StreamOrigin, StreamSyncRequest,
 };
 use syntaxmesh_integration_penelope::{
     ContractHistoryRequest as PenelopeContractHistoryRequest, PenelopeInferenceMaterializer,
@@ -63,6 +63,15 @@ pub struct ContractResultAsOf {
     pub target_generation: syntaxmesh_core::GenerationId,
     pub target_sequence: u64,
     pub evaluation: Option<RetainedContractEvaluation>,
+}
+
+/// Indexed summary of the outcome episode containing the latest as-of result.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ContractOutcomeAsOf {
+    pub target_generation: syntaxmesh_core::GenerationId,
+    pub target_sequence: u64,
+    pub evaluation: Option<RetainedContractEvaluation>,
+    pub episode: Option<ContractOutcomeEpisode>,
 }
 
 impl<S: GraphStore + DurableRecordStore, E: LanguageExtractor> SyntaxMeshEngine<S, E> {
@@ -130,16 +139,15 @@ impl<S: GraphStore + DurableRecordStore, E: LanguageExtractor> SyntaxMeshEngine<
             .map_err(|error| WorkflowError::Verification(error.to_string()))?
             .latest_contract_set(self.repository, self.worktree)
             .map_err(|error| WorkflowError::Verification(error.to_string()))?;
-        if let Some(latest) = latest {
-            if request_sequence < latest.watermark.generation_sequence
+        if let Some(latest) = latest
+            && (request_sequence < latest.watermark.generation_sequence
                 || (request_sequence == latest.watermark.generation_sequence
-                    && contracts != latest.contracts)
-            {
-                return Err(WorkflowError::Store(StoreError::InvalidDelta(
-                    "contract set must replace the authoring head at a later generation; same-generation changes are ambiguous".to_owned(),
-                ))
-                .into());
-            }
+                    && contracts != latest.contracts))
+        {
+            return Err(WorkflowError::Store(StoreError::InvalidDelta(
+                "contract set must replace the authoring head at a later generation; same-generation changes are ambiguous".to_owned(),
+            ))
+            .into());
         }
         Ok(
             PenelopeInferenceMaterializer::new(self.indexer.store_mut()).retain_contract_history(
@@ -372,6 +380,57 @@ impl<S: GraphStore + DurableRecordStore, E: LanguageExtractor> SyntaxMeshEngine<
             target_generation,
             target_sequence,
             evaluation,
+        })
+    }
+
+    /// Read the indexed outcome episode for the latest retained evaluation at or before a target.
+    ///
+    /// The episode is bounded by observed evaluations only. It is not a compliance claim for the
+    /// target generation unless that generation itself has a retained result.
+    ///
+    /// # Errors
+    /// Rejects foreign generations, unmigrated downstream storage, or inconsistent episode data.
+    pub fn contract_outcome_as_of(
+        &self,
+        database: impl AsRef<Path>,
+        target_generation: syntaxmesh_core::GenerationId,
+        contract_id: &str,
+        contract_version: &str,
+    ) -> Result<ContractOutcomeAsOf, EngineError> {
+        let result = self.contract_result_as_of(
+            database.as_ref(),
+            target_generation,
+            contract_id,
+            contract_version,
+        )?;
+        let episode = result
+            .evaluation
+            .as_ref()
+            .map(|evaluation| {
+                InferenceMaterializer::open(database.as_ref())
+                    .map_err(|error| WorkflowError::Verification(error.to_string()))?
+                    .contract_outcome_episode_at(&ContractOutcomeEpisodeQuery {
+                        repository: self.repository,
+                        worktree: self.worktree,
+                        evaluation_sequence: evaluation.generation_sequence,
+                        evaluation_generation: evaluation.evaluation.generation,
+                        expected_outcome: evaluation.evaluation.outcome,
+                        contract_id: contract_id.to_owned(),
+                        contract_version: contract_version.to_owned(),
+                    })
+                    .map_err(|error| WorkflowError::Verification(error.to_string()))?
+                    .ok_or_else(|| {
+                        WorkflowError::Verification(
+                            "retained contract outcome episode is missing".to_owned(),
+                        )
+                    })
+            })
+            .transpose()?;
+        Ok(ContractOutcomeAsOf {
+            target_generation: result.target_generation,
+            target_sequence: result.target_sequence,
+            evaluation: result.evaluation,
+            episode,
         })
     }
 

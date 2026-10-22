@@ -2,12 +2,16 @@
 
 use std::path::Path;
 use std::process::{Command, Output};
+use syntaxmesh_inference::{Limits, Rule};
+use syntaxmesh_query::Query;
 use syntaxmesh_store::GraphStore;
 
 #[path = "inference_commands/contract_history.rs"]
 mod contract_history;
 #[path = "inference_commands/contracts_authoring.rs"]
 mod contracts_authoring;
+#[path = "../../syntaxmesh-query/src/service/inference/tests/fixture.rs"]
+mod fixture;
 #[path = "inference_commands/pages.rs"]
 mod pages;
 #[path = "inference_commands/recovery.rs"]

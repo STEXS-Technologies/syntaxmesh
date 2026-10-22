@@ -934,6 +934,7 @@ syntaxmesh inference-claims-page /path/to/state/inference.sqlite "$baseline_gene
 syntaxmesh inference-retain-contracts /path/to/state/graph.snapshot /path/to/state/inference.sqlite "$generation" /path/to/contracts.json
 syntaxmesh inference-catch-up /path/to/state/graph.snapshot /path/to/state/inference.sqlite "$through_generation" 100 10000 1048576 100000 1048576
 syntaxmesh inference-result-as-of /path/to/state/graph.snapshot /path/to/state/inference.sqlite "$selected_generation" target-not-in-concept 1
+syntaxmesh inference-outcome-as-of /path/to/state/graph.snapshot /path/to/state/inference.sqlite "$selected_generation" target-not-in-concept 1
 ```
 
 Migration is explicit and respects writer ownership. Recovery runs existing
@@ -991,6 +992,14 @@ the requested generation and actual evaluation generation separately, with
 `current`, `stale`, or `unavailable` freshness; an older result is not a
 compliance claim about the selected generation. This is read-only and does not
 replay canonical history.
+
+`inference-outcome-as-of[-turso]` adds an indexed compact outcome episode for
+that retained result: the first and last generations where the same outcome was
+observed. `current`, `stale`, and `unavailable` retain the same meaning as the
+result lookup. Episode bounds describe evaluations only; they do not claim
+continuous conformance or elapsed calendar duration across unevaluated
+generations. Migration 7 backfills this downstream projection; run the explicit
+inference migration before using the command.
 
 Configuration version 1 selects unregistered rule evaluation and remains
 backward-compatible. Version 2 selects ontology-registered inference and adds

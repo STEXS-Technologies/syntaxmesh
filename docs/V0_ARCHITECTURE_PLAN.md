@@ -3347,12 +3347,17 @@ The separate `syntaxmesh-extension-process` adapter now owns subprocess group
 lifecycle: it applies a deadline, bounds stdout/stderr capture, requires one
 successful authorized frame, and kills/reaps descendants on timeout and after
 the producer leader exits ([ADR-0391](adr/0391-supervised-out-of-process-extension-execution.md)).
-The out-of-tree producer fixture exercises this adapter, partial-frame rejection,
-stdout overflow, timeout, and descendant cleanup before continuing through
-File/Turso Engine import and opt-in StateChronicle verification. `cargo make
-extension-fixture` passes. Daemon command configuration, authenticated peer
-handling, concurrency policy, and stronger OS sandboxing remain open; process
-group supervision alone is not a security boundary.
+The explicit `run-extension[-turso]` CLI host now composes that adapter with the
+existing Engine/Penelope publication path. It validates the grant before
+launch, acquires the writer lease before producer execution, clears child
+environment by default with named-variable allowlisting, and supports opt-in
+StateChronicle publication ([ADR-0392](adr/0392-one-shot-cli-extension-host.md)).
+The out-of-tree producer fixture exercises adapter limits/timeout/descendant
+cleanup plus CLI success, partial-frame and invalid-grant rejection, unchanged
+state after failure, File/Turso publication, and verified-history status. Daemon
+configuration and scheduling, authenticated remote peers, concurrency policy,
+and stronger OS sandboxing remain open; process-group supervision alone is not
+a security boundary.
 The independent-producer additions passed full `cargo make ci` on Linux in
 115.85 seconds; this does not establish HTTP/daemon acceptance or hosted-platform
 results. The strengthened dependency guard additionally has a focused regression

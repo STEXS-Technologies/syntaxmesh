@@ -2,4 +2,6 @@
 
 mod supervisor;
 
-pub use supervisor::{ProcessLimits, ProcessReceipt, ProcessSupervisor, SupervisionError};
+pub use supervisor::{
+    ProcessLimits, ProcessReceipt, ProcessSupervisor, ProducerCommand, SupervisionError,
+};

@@ -75,6 +75,7 @@ Usage:\n\
   syntaxmesh cycles[-turso] <store> <current|generation-id> <calls|imports|all>\n\
   syntaxmesh watch[-turso] <root> <store-outside-root> [index options] [--poll-only] [--reconcile-ms <positive-ms>] [--watch-duration-ms <positive-ms>]\n\
   syntaxmesh ingest-extension[-turso] <store> <grant.json> <frame> <run-id> <generation-id> [--verify]\n\
+  syntaxmesh run-extension[-turso] <store> <grant.json> <run-id> <generation-id> [--timeout-ms <positive-ms>] [--env <name>]... [--verify] -- <program> [args...]\n\
   AI harness transport: add --semantic [model] --semantic-command '<JSON argv array>|@path' to index/index-turso\n\
   syntaxmesh init [project-root] [--verified-history] [--node-module-resolution] [--python-module-resolution]\n\
   syntaxmesh index [root] [snapshot] [--verify] [--record-syntax-failures] [--semantic [model] [--semantic-endpoint <url>] [--semantic-api-key-env <name>] [--semantic-model-revision <revision>] [--allow-network]]\n\
@@ -589,6 +590,9 @@ fn run(arguments: impl IntoIterator<Item = String>) -> Result<(), CliError> {
         "cycles" | "cycles-turso" => cycles::run(arguments, command == "cycles-turso"),
         "ingest-extension" | "ingest-extension-turso" => {
             extensions::ingest(arguments, command == "ingest-extension-turso")
+        }
+        "run-extension" | "run-extension-turso" => {
+            extensions::run_process(arguments, command == "run-extension-turso")
         }
         "init" => init_project(arguments),
         "watch" | "watch-turso" => watching::run(arguments, command == "watch-turso"),

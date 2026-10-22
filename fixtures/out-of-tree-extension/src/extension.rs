@@ -62,6 +62,13 @@ pub(super) fn write_delayed_marker(marker: &str) -> Result<(), Box<dyn std::erro
     Ok(())
 }
 
+pub(super) fn write_environment_marker(marker: &str) -> Result<(), Box<dyn std::error::Error>> {
+    let value =
+        std::env::var("SYNTAXMESH_EXTENSION_FIXTURE_SECRET").unwrap_or_else(|_| "unset".to_owned());
+    std::fs::write(marker, value)?;
+    Ok(())
+}
+
 #[cfg(feature = "embedded")]
 pub(super) fn publish_and_query() -> Result<(), Box<dyn std::error::Error>> {
     let repository = RepositoryId::derive(&[b"out-of-tree-repository"]);

@@ -1,3 +1,4 @@
+use std::ffi::OsStr;
 use std::io::{self, Cursor, Read};
 use std::process::{Command, Stdio};
 use std::sync::Arc;
@@ -53,6 +54,44 @@ pub struct ProcessSupervisor {
     limits: ProcessLimits,
 }
 
+/// Explicit operator-selected producer command with ambient environment
+/// inheritance disabled by default.
+pub struct ProducerCommand {
+    command: Command,
+}
+
+impl ProducerCommand {
+    /// Select one executable and start with an empty child environment.
+    #[must_use]
+    pub fn new(program: impl AsRef<OsStr>) -> Self {
+        let mut command = Command::new(program);
+        command.env_clear();
+        Self { command }
+    }
+
+    /// Add one producer argument without invoking a shell.
+    pub fn arg(&mut self, argument: impl AsRef<OsStr>) -> &mut Self {
+        self.command.arg(argument);
+        self
+    }
+
+    /// Add producer arguments without invoking a shell.
+    pub fn args<I, S>(&mut self, arguments: I) -> &mut Self
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<OsStr>,
+    {
+        self.command.args(arguments);
+        self
+    }
+
+    /// Allow one explicitly selected environment value into the child.
+    pub fn env(&mut self, name: impl AsRef<OsStr>, value: impl AsRef<OsStr>) -> &mut Self {
+        self.command.env(name, value);
+        self
+    }
+}
+
 impl ProcessSupervisor {
     /// Create a supervisor with bounded stdout/stderr and a positive deadline.
     ///
@@ -82,7 +121,7 @@ impl ProcessSupervisor {
     /// missing/trailing frame bytes, or authorization/framing validation errors.
     pub fn run_batch(
         &self,
-        command: &mut Command,
+        command: &mut ProducerCommand,
         grant: &ExtensionManifest,
     ) -> Result<ProcessReceipt, SupervisionError> {
         let started = Instant::now();
@@ -90,10 +129,14 @@ impl ProcessSupervisor {
             .checked_add(self.limits.timeout)
             .ok_or(SupervisionError::InvalidLimits)?;
         command
+            .command
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
-        let mut child = command.group_spawn().map_err(SupervisionError::Spawn)?;
+        let mut child = command
+            .command
+            .group_spawn()
+            .map_err(SupervisionError::Spawn)?;
         let stdout = child
             .inner()
             .stdout

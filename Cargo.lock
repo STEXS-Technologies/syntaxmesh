@@ -4670,6 +4670,7 @@ dependencies = [
  "syntaxmesh-core",
  "syntaxmesh-engine",
  "syntaxmesh-extension-ipc",
+ "syntaxmesh-extension-process",
  "syntaxmesh-extension-sdk",
  "syntaxmesh-http",
  "syntaxmesh-inference",

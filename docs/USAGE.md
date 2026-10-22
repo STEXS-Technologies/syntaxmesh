@@ -36,13 +36,26 @@ does not supervise producers, authenticate network peers, or launch other runtim
 If stdout fails after publication, inspect the store before retrying.
 See [ADR-0175](docs/adr/0175-cli-authorized-extension-import.md).
 
-Hosts that need one-shot producer execution can compose the separate
-`syntaxmesh-extension-process` adapter with the SDK/IPC frame contract. It
-requires an operator-selected `Command`, independent producer grant, deadline,
-and bounded output; it returns a validated `FactBatch` for the caller to submit
-to the Engine. This is a host composition primitive, not an automatic daemon or
-CLI launch path, and process-group cleanup is not an OS security sandbox. See
-[ADR-0391](docs/adr/0391-supervised-out-of-process-extension-execution.md).
+For explicit one-shot producer execution, use the supervised CLI host:
+
+```sh
+syntaxmesh run-extension-turso <database> <grant.json> <run-id> <generation-id> \
+  [--timeout-ms <positive-ms>] [--env <name>]... [--verify] -- \
+  /absolute/path/to/producer [producer-arguments...]
+```
+
+Use `run-extension` for a File snapshot. The store must already be initialized.
+The host acquires its writer lease before launching the producer and holds it
+through publication. It validates the operator grant before launch, clears the
+child environment by default, and passes only variables explicitly named by
+`--env`. Timeout defaults to 60 seconds; stdout is capped at one 4 MiB frame
+plus its header, and at most 16 KiB of stderr is retained. A successful command
+returns the existing publication receipt with process timing/output metadata.
+The producer command and arguments are explicit operator policy. The host does
+not launch producers during indexing, watch, or daemon startup, and process-group
+cleanup is not an OS security sandbox. Stronger containment remains the
+operator's responsibility ([ADR-0391](docs/adr/0391-supervised-out-of-process-extension-execution.md),
+[ADR-0392](docs/adr/0392-one-shot-cli-extension-host.md)).
 
 The out-of-tree fixture can produce a sample frame without Engine/store dependencies:
 
@@ -50,8 +63,9 @@ The out-of-tree fixture can produce a sample frame without Engine/store dependen
 cargo run --quiet --locked --manifest-path fixtures/out-of-tree-extension/Cargo.toml --no-default-features -- --emit-frame > batch.frame
 ```
 
-`cargo make extension-fixture` checks independent producer import and partial
-producer-failure isolation on File and Turso, alongside embedded SDK conformance.
+`cargo make extension-fixture` checks supervised external producer publication,
+partial-frame rejection, grant preflight, failure isolation, and opt-in verified
+history on File and Turso, alongside embedded SDK conformance.
 
 CLI watch/watch-turso, index/index-turso, ingest-extension/ingest-extension-turso, and
 sqlite-migrate/turso-migrate hold the same persistent .syntaxmesh-owner.lock

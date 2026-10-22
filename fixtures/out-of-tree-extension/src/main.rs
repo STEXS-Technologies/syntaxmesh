@@ -13,6 +13,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         [mode] if mode == "--sleep" => extension::sleep_forever(),
         [mode, marker] if mode == "--spawn-descendant" => extension::spawn_descendant(marker),
         [mode, marker] if mode == "--write-marker" => extension::write_delayed_marker(marker),
+        [mode, marker] if mode == "--write-environment-marker" => {
+            extension::write_environment_marker(marker)
+        }
         _ => Err("fixture received an unsupported process-conformance mode".into()),
     }
 }

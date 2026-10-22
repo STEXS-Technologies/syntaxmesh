@@ -295,8 +295,13 @@ impl<'ast> Visit<'ast> for RuntimeLaunchAudit {
             // Explicit opt-in AI harness transport is the sole dynamic host exception.
             let semantic_harness =
                 self.source.ends_with("/cli/semantic/command.rs") && executable.is_none();
+            let extension_host = self
+                .source
+                .ends_with("crates/syntaxmesh-extension-process/src/supervisor.rs")
+                && executable.is_none();
             if !rust_test_self
                 && !semantic_harness
+                && !extension_host
                 && !executable
                     .is_some_and(|name| name == "git" || name.starts_with("CARGO_BIN_EXE_"))
             {
@@ -398,6 +403,7 @@ mod architecture_tests {
             ("crates/syntaxmesh-cli/src/cli/semantic/command.rs", 1),
             ("crates/syntaxmesh-cli/src/cli/semantic.rs", 2),
             ("crates/syntaxmesh-engine/src/command.rs", 2),
+            ("crates/syntaxmesh-extension-process/src/supervisor.rs", 1),
         ] {
             let mut audit = RuntimeLaunchAudit {
                 source: source.to_owned(),

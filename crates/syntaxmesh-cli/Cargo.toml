@@ -35,6 +35,7 @@ syntaxmesh-api-model.workspace = true
 syntaxmesh-core.workspace = true
 syntaxmesh-engine.workspace = true
 syntaxmesh-extension-ipc = { path = "../syntaxmesh-extension-ipc" }
+syntaxmesh-extension-process = { workspace = true }
 syntaxmesh-extension-sdk.workspace = true
 syntaxmesh-lang-rust.workspace = true
 syntaxmesh-lang-python.workspace = true

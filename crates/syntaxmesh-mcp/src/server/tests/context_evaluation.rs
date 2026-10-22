@@ -74,6 +74,11 @@ fn function_target_identity_excludes_prefixed_test_names() {
         "Infrastructure independence",
         "DocumentChunk"
     ));
+    assert!(target_name_matches(
+        "The existing saga APIs and v1 records retain their meaning. Alongside them,\n",
+        "The existing saga APIs and v1 records retain their meaning",
+        "DocumentChunk"
+    ));
 }
 
 #[test]
@@ -308,6 +313,13 @@ fn context_sibling_source_retrieval_evaluation() -> Result<(), Box<dyn Error>> {
                 "Recoverable task execution",
                 "README.md",
                 "Section",
+            ),
+            (
+                "penelope_recovery_doc_content",
+                "how durable checkpoints, execution, fencing, and recovery coordinate",
+                "The existing saga APIs and v1 records retain their meaning",
+                "README.md",
+                "DocumentChunk",
             ),
         ],
         "statechronicle" => vec![
@@ -928,20 +940,16 @@ fn context_sibling_source_retrieval_evaluation() -> Result<(), Box<dyn Error>> {
                                 .and_then(Value::as_array)
                                 .is_some_and(|ids| ids.iter().any(|id| id == &target_record))
                     });
-                let target_items = value
+                let packed_items = value
                     .get("items")
                     .and_then(Value::as_array)
                     .into_iter()
                     .flatten()
-                    .filter(|item| {
-                        item.get("node_ids")
-                            .and_then(Value::as_array)
-                            .is_some_and(|ids| ids.iter().any(|id| id == &target_record))
-                    })
                     .filter_map(|item| {
                         Some(serde_json::json!({
                             "kind": item.get("kind")?,
                             "text": item.get("text")?,
+                            "node_ids": item.get("node_ids")?,
                             "source_path": item.get("source_path"),
                             "line_start": item.get("line_start"),
                             "line_end": item.get("line_end"),
@@ -949,8 +957,8 @@ fn context_sibling_source_retrieval_evaluation() -> Result<(), Box<dyn Error>> {
                     })
                     .collect::<Vec<_>>();
                 eprintln!(
-                    "context_target_seed_items corpus={corpus} case={case_id} budget={budget} items={}",
-                    serde_json::to_string(&target_items)?
+                    "context_target_seed_pack corpus={corpus} case={case_id} budget={budget} target={target_record:?} items={}",
+                    serde_json::to_string(&packed_items)?
                 );
                 eprintln!(
                     "context_target_seed_probe corpus={corpus} case={case_id} budget={budget} retrieved={retrieved} tokens={tokens}"

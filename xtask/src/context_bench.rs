@@ -220,7 +220,8 @@ pub(super) fn run(workspace: &Path) -> BenchResult<()> {
             .as_deref()
         {
             Some("shardline") => 7,
-            Some("penelope" | "statechronicle") => 3,
+            Some("penelope") => 4,
+            Some("statechronicle") => 3,
             _ => 5,
         }
     });

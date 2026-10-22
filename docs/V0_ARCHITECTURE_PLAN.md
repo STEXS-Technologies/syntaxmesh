@@ -3539,6 +3539,19 @@ The harness change's unit test, strict Clippy, architecture gate, and full
 `cargo make ci` pass (147.74 seconds); routine CI excludes the opt-in DuckDB
 adapter and the live semantic-provider evaluation.
 
+Documentation-target calibration (2026-10-22): the selected Penelope fixture
+now measures both a Markdown `Section` heading and a distinct source-backed
+`DocumentChunk` from that section. On the same selected-file fingerprint
+`0a20c4cee4ce…`, automatic 2,048-token retrieval included the body chunk
+(`The existing saga APIs and v1 records retain their meaning`) but omitted its
+heading node; at 8,192 tokens it included both. The four-target matrix therefore
+scored 3/4 and 4/4, respectively. This corrects the earlier interpretation of
+the documentation miss: the small-budget case demonstrates heading-node
+omission, not absence of the relevant document content. It does not establish
+general documentation relevance—the result is one fresh selected-file run on a
+dirty external corpus. Exact packed items and source fingerprint are retained
+under ignored `target/context-retrieval-results/context-20261022T181049.581939Z-6ffae0eaf126/`.
+
 Whole-repository source-content follow-up (2026-10-22): StateChronicle's
 repository-scope run now resolves target IDs against the pinned generation
 rather than the MCP name-search endpoint's 100-result cap. On 238 tracked

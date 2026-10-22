@@ -1,7 +1,11 @@
 use std::path::Path;
 use std::process::{Command, Output};
+use std::time::Duration;
 
 use crate::TaskResult;
+use syntaxmesh_extension_ipc::{FrameCodec, FrameError, MAX_FRAME_BYTES};
+use syntaxmesh_extension_process::{ProcessLimits, ProcessSupervisor, SupervisionError};
+use syntaxmesh_extension_sdk::{Capability, EXTENSION_MANIFEST_SCHEMA_VERSION, ExtensionManifest};
 
 #[cfg(test)]
 mod tests;
@@ -60,6 +64,110 @@ fn require_success(output: &Output) -> TaskResult<()> {
     Ok(())
 }
 
+fn producer_command(root: &Path, producer_manifest: &Path, arguments: &[&str]) -> Command {
+    let mut command = Command::new("cargo");
+    command
+        .current_dir(root)
+        .args([
+            "run",
+            "--quiet",
+            "--locked",
+            "--no-default-features",
+            "--manifest-path",
+        ])
+        .arg(producer_manifest)
+        .arg("--")
+        .args(arguments);
+    command
+}
+
+fn verify_process_supervision(
+    root: &Path,
+    producer_manifest: &Path,
+    fixture: &Path,
+    expected_frame: &[u8],
+) -> TaskResult<()> {
+    let grant = ExtensionManifest {
+        schema_version: EXTENSION_MANIFEST_SCHEMA_VERSION,
+        namespace: "fixture.catalog".to_owned(),
+        producer_version: "1.0.0".to_owned(),
+        capabilities: vec![Capability::AnalysisFacts, Capability::RuntimeObservations],
+    };
+    let supervisor = ProcessSupervisor::new(ProcessLimits::new(Duration::from_secs(120)))?;
+    let receipt = supervisor.run_batch(
+        &mut producer_command(root, producer_manifest, &["--emit-frame"]),
+        &grant,
+    )?;
+    let mut frame = Vec::new();
+    FrameCodec::new(MAX_FRAME_BYTES)?.write_batch(&mut frame, &receipt.batch)?;
+    if frame != expected_frame || receipt.stdout_bytes != expected_frame.len() {
+        return Err("supervised external producer changed its authorized frame".into());
+    }
+
+    if !matches!(
+        supervisor.run_batch(
+            &mut producer_command(root, producer_manifest, &["--emit-truncated-frame-success"],),
+            &grant,
+        ),
+        Err(SupervisionError::Frame(FrameError::Io(_)))
+    ) {
+        return Err("supervisor did not reject a successful process with a partial frame".into());
+    }
+
+    let short = ProcessSupervisor::new(ProcessLimits {
+        timeout: Duration::from_secs(120),
+        stdout_bytes: 64,
+        stderr_bytes: 128,
+    })?;
+    if !matches!(
+        short.run_batch(
+            &mut producer_command(root, producer_manifest, &["--emit-frame"]),
+            &grant,
+        ),
+        Err(SupervisionError::StdoutLimit)
+    ) {
+        return Err("supervisor did not enforce the external producer output cap".into());
+    }
+
+    let timed = ProcessSupervisor::new(ProcessLimits {
+        timeout: Duration::from_secs(1),
+        stdout_bytes: MAX_FRAME_BYTES + 12,
+        stderr_bytes: 128,
+    })?;
+    if !matches!(
+        timed.run_batch(
+            &mut producer_command(root, producer_manifest, &["--sleep"]),
+            &grant,
+        ),
+        Err(SupervisionError::TimedOut { .. })
+    ) {
+        return Err("supervisor did not kill a producer at its deadline".into());
+    }
+
+    let marker = fixture.join("descendant-survived-marker");
+    if !matches!(
+        timed.run_batch(
+            &mut producer_command(
+                root,
+                producer_manifest,
+                &[
+                    "--spawn-descendant",
+                    marker.to_str().ok_or("non-UTF8 process-test marker path")?,
+                ],
+            ),
+            &grant,
+        ),
+        Err(SupervisionError::TimedOut { .. })
+    ) {
+        return Err("supervisor did not time out the producer with a child process".into());
+    }
+    std::thread::sleep(Duration::from_secs(2));
+    if marker.exists() {
+        return Err("producer descendant survived process-group cleanup".into());
+    }
+    Ok(())
+}
+
 pub(crate) fn verify(root: &Path, producer_manifest: &Path) -> TaskResult<()> {
     let dependencies = Command::new("cargo")
         .current_dir(root)
@@ -94,6 +202,8 @@ pub(crate) fn verify(root: &Path, producer_manifest: &Path) -> TaskResult<()> {
     };
     let complete = produce("--emit-frame")?;
     require_success(&complete)?;
+    let fixture = tempfile::tempdir()?;
+    verify_process_supervision(root, producer_manifest, fixture.path(), &complete.stdout)?;
     let partial = produce("--emit-truncated-frame")?;
     if partial.status.success()
         || partial.stdout.len() != 11
@@ -101,7 +211,6 @@ pub(crate) fn verify(root: &Path, producer_manifest: &Path) -> TaskResult<()> {
     {
         return Err("external producer did not fail after its partial header".into());
     }
-    let fixture = tempfile::tempdir()?;
     let source = fixture.path().join("source");
     std::fs::create_dir(&source)?;
     std::fs::write(source.join("lib.rs"), "pub fn fixture() {}\n")?;

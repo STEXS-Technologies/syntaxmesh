@@ -790,6 +790,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "command-group"
+version = "5.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a68fa787550392a9d58f44c21a3022cfb3ea3e2458b7f85d3b399d0ceeccf409"
+dependencies = [
+ "nix 0.27.1",
+ "winapi",
+]
+
+[[package]]
 name = "compact_str"
 version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -990,7 +1000,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e0b1fab2ae45819af2d0731d60f2afe17227ebb1a1538a236da84c93e9a60162"
 dependencies = [
  "dispatch2",
- "nix",
+ "nix 0.31.3",
  "windows-sys 0.61.2",
 ]
 
@@ -2527,6 +2537,17 @@ dependencies = [
  "log",
  "wasi",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "nix"
+version = "0.27.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2eb04e9c688eff1c89d72b407f168cf79bb9e867a9d3323ed6c01519eb9cc053"
+dependencies = [
+ "bitflags",
+ "cfg-if",
+ "libc",
 ]
 
 [[package]]
@@ -4640,7 +4661,7 @@ dependencies = [
  "ctrlc",
  "hex",
  "httpdate",
- "nix",
+ "nix 0.31.3",
  "oxc_resolver",
  "reqwest",
  "serde",
@@ -4706,7 +4727,7 @@ version = "0.0.0"
 dependencies = [
  "axum",
  "ctrlc",
- "nix",
+ "nix 0.31.3",
  "reqwest",
  "rmcp",
  "serde",
@@ -4766,6 +4787,16 @@ version = "0.0.0"
 dependencies = [
  "serde_json",
  "syntaxmesh-extension-sdk",
+]
+
+[[package]]
+name = "syntaxmesh-extension-process"
+version = "0.0.0"
+dependencies = [
+ "command-group",
+ "syntaxmesh-extension-ipc",
+ "syntaxmesh-extension-sdk",
+ "tempfile",
 ]
 
 [[package]]
@@ -5182,6 +5213,9 @@ dependencies = [
  "rusqlite",
  "serde_json",
  "syn 3.0.6",
+ "syntaxmesh-extension-ipc",
+ "syntaxmesh-extension-process",
+ "syntaxmesh-extension-sdk",
  "syntaxmesh-scanner",
  "tempfile",
 ]
@@ -6631,7 +6665,7 @@ dependencies = [
  "flate2",
  "indexmap",
  "memchr",
- "nix",
+ "nix 0.31.3",
  "typed-path",
  "zopfli",
 ]

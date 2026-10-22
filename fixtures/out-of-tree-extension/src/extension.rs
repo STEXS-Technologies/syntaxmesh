@@ -34,6 +34,34 @@ pub(super) fn emit_frame(truncated: bool) -> Result<(), Box<dyn std::error::Erro
     Ok(())
 }
 
+pub(super) fn emit_truncated_frame_success() -> Result<(), Box<dyn std::error::Error>> {
+    use std::io::Write;
+    use syntaxmesh_extension_ipc::{FrameCodec, MAX_FRAME_BYTES};
+    let node_id = NodeId::derive(&[NAMESPACE.as_bytes(), b"service", b"inventory"]);
+    let mut frame = Vec::new();
+    FrameCodec::new(MAX_FRAME_BYTES)?.write_batch(&mut frame, &catalog_facts(node_id))?;
+    std::io::stdout().write_all(frame.get(..11).ok_or("fixture header missing")?)?;
+    Ok(())
+}
+
+pub(super) fn sleep_forever() -> Result<(), Box<dyn std::error::Error>> {
+    std::thread::sleep(std::time::Duration::from_secs(30));
+    Ok(())
+}
+
+pub(super) fn spawn_descendant(marker: &str) -> Result<(), Box<dyn std::error::Error>> {
+    std::process::Command::new(std::env::current_exe()?)
+        .args(["--write-marker", marker])
+        .spawn()?;
+    sleep_forever()
+}
+
+pub(super) fn write_delayed_marker(marker: &str) -> Result<(), Box<dyn std::error::Error>> {
+    std::thread::sleep(std::time::Duration::from_millis(1_800));
+    std::fs::write(marker, b"survived")?;
+    Ok(())
+}
+
 #[cfg(feature = "embedded")]
 pub(super) fn publish_and_query() -> Result<(), Box<dyn std::error::Error>> {
     let repository = RepositoryId::derive(&[b"out-of-tree-repository"]);

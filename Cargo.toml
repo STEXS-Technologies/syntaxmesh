@@ -6,6 +6,7 @@ default-members = [
     "crates/syntaxmesh-runtime-protocol",
     "crates/syntaxmesh-extension-sdk",
     "crates/syntaxmesh-extension-ipc",
+    "crates/syntaxmesh-extension-process",
     "crates/syntaxmesh-semantic",
     "crates/syntaxmesh-store",
     "crates/syntaxmesh-language-sdk",
@@ -47,6 +48,7 @@ members = [
     "crates/syntaxmesh-runtime-protocol",
     "crates/syntaxmesh-extension-sdk",
     "crates/syntaxmesh-extension-ipc",
+    "crates/syntaxmesh-extension-process",
     "crates/syntaxmesh-semantic",
     "crates/syntaxmesh-store",
     "crates/syntaxmesh-language-sdk",
@@ -96,6 +98,9 @@ repository = "https://github.com/STEXS-Technologies/syntaxmesh"
 syntaxmesh-inference = { path = "crates/syntaxmesh-inference" }
 syntaxmesh-inference-sqlite = { path = "crates/syntaxmesh-inference-sqlite" }
 syntaxmesh-inference-host = { path = "crates/syntaxmesh-inference-host" }
+syntaxmesh-extension-process = { path = "crates/syntaxmesh-extension-process" }
+syntaxmesh-extension-ipc = { path = "crates/syntaxmesh-extension-ipc" }
+syntaxmesh-extension-sdk = { path = "crates/syntaxmesh-extension-sdk" }
 axum = { version = "0.8.9", default-features = false, features = ["http1", "json", "query", "tokio"] }
 base64 = { version = "0.23.1", default-features = false, features = ["std"] }
 blake3 = "1"
@@ -116,6 +121,7 @@ toml = "1.1.6"
 reqwest = { version = "0.13.5", default-features = false, features = ["blocking", "json", "rustls"] }
 url = "2.5.8"
 httpdate = "1.0.3"
+command-group = "5.0.1"
 syn = { version = "3", features = ["full", "visit"] }
 quote = "1"
 proc-macro2 = { version = "1", features = ["span-locations"] }
@@ -153,7 +159,6 @@ syntaxmesh-workflow = { path = "crates/syntaxmesh-workflow" }
 syntaxmesh-integration-penelope = { path = "crates/syntaxmesh-integration-penelope" }
 syntaxmesh-integration-statechronicle = { path = "crates/syntaxmesh-integration-statechronicle" }
 syntaxmesh-engine = { path = "crates/syntaxmesh-engine" }
-syntaxmesh-extension-sdk = { path = "crates/syntaxmesh-extension-sdk" }
 syntaxmesh-semantic = { path = "crates/syntaxmesh-semantic" }
 syntaxmesh-graph = { path = "crates/syntaxmesh-graph" }
 syntaxmesh-store-turso = { path = "crates/syntaxmesh-store-turso" }

@@ -36,6 +36,14 @@ does not supervise producers, authenticate network peers, or launch other runtim
 If stdout fails after publication, inspect the store before retrying.
 See [ADR-0175](docs/adr/0175-cli-authorized-extension-import.md).
 
+Hosts that need one-shot producer execution can compose the separate
+`syntaxmesh-extension-process` adapter with the SDK/IPC frame contract. It
+requires an operator-selected `Command`, independent producer grant, deadline,
+and bounded output; it returns a validated `FactBatch` for the caller to submit
+to the Engine. This is a host composition primitive, not an automatic daemon or
+CLI launch path, and process-group cleanup is not an OS security sandbox. See
+[ADR-0391](docs/adr/0391-supervised-out-of-process-extension-execution.md).
+
 The out-of-tree fixture can produce a sample frame without Engine/store dependencies:
 
 ```sh

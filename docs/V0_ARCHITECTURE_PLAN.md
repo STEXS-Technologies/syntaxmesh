@@ -3342,8 +3342,17 @@ producer in thin mode (normal dependencies exclude Engine/store/workflows and
 their database/integration adapters), checks
 verified imports into both CLI backends, and rejects its partial-header failure
 without changing accepted graph or workflow diagnostics. Daemon peer/lifecycle
-and timeout/kill supervision remain open; this file-import evidence does not
-complete those host requirements.
+remain open; the file-import evidence does not complete those host requirements.
+The separate `syntaxmesh-extension-process` adapter now owns subprocess group
+lifecycle: it applies a deadline, bounds stdout/stderr capture, requires one
+successful authorized frame, and kills/reaps descendants on timeout and after
+the producer leader exits ([ADR-0391](adr/0391-supervised-out-of-process-extension-execution.md)).
+The out-of-tree producer fixture exercises this adapter, partial-frame rejection,
+stdout overflow, timeout, and descendant cleanup before continuing through
+File/Turso Engine import and opt-in StateChronicle verification. `cargo make
+extension-fixture` passes. Daemon command configuration, authenticated peer
+handling, concurrency policy, and stronger OS sandboxing remain open; process
+group supervision alone is not a security boundary.
 The independent-producer additions passed full `cargo make ci` on Linux in
 115.85 seconds; this does not establish HTTP/daemon acceptance or hosted-platform
 results. The strengthened dependency guard additionally has a focused regression

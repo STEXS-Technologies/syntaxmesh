@@ -7,6 +7,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         [] => extension::publish_and_query(),
         [mode] if mode == "--emit-frame" => extension::emit_frame(false),
         [mode] if mode == "--emit-truncated-frame" => extension::emit_frame(true),
-        _ => Err("fixture accepts --emit-frame or --emit-truncated-frame".into()),
+        [mode] if mode == "--emit-truncated-frame-success" => {
+            extension::emit_truncated_frame_success()
+        }
+        [mode] if mode == "--sleep" => extension::sleep_forever(),
+        [mode, marker] if mode == "--spawn-descendant" => extension::spawn_descendant(marker),
+        [mode, marker] if mode == "--write-marker" => extension::write_delayed_marker(marker),
+        _ => Err("fixture received an unsupported process-conformance mode".into()),
     }
 }

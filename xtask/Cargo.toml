@@ -16,6 +16,9 @@ serde_json.workspace = true
 syn.workspace = true
 tempfile.workspace = true
 syntaxmesh-scanner.workspace = true
+syntaxmesh-extension-process.workspace = true
+syntaxmesh-extension-ipc.workspace = true
+syntaxmesh-extension-sdk.workspace = true
 
 [lints]
 workspace = true

@@ -1,0 +1,19 @@
+[package]
+name = "syntaxmesh-extension-process"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Bounded process supervision for external SyntaxMesh producers"
+
+[dependencies]
+command-group.workspace = true
+syntaxmesh-extension-ipc = { path = "../syntaxmesh-extension-ipc" }
+syntaxmesh-extension-sdk = { path = "../syntaxmesh-extension-sdk" }
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true

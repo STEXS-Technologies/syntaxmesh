@@ -3,6 +3,8 @@ use syntaxmesh_api_model::{ContextItem, ContextItemKind, ContextPack, OmittedCon
 use super::{Candidate, ContextTokenCounter, finalize_count};
 use crate::QueryError;
 
+const COMPLETE_CANDIDATE_RETRY_LIMIT: usize = 6;
+
 #[cfg(test)]
 mod tests;
 
@@ -54,12 +56,12 @@ pub(super) fn try_candidate(
     let Some((_, source)) = candidate.item.text.split_once('\n') else {
         return Ok(false);
     };
-    if source.len() <= 512 || source.len() > *remaining_scan_bytes {
-        return Ok(false);
-    }
-    *remaining_scan_bytes = remaining_scan_bytes.saturating_sub(source.len());
-    let excerpts =
-        super::excerpts::query_windows(source, first_line, &pack.query, remaining_excerpt_bytes);
+    let excerpts = if source.len() <= 512 || source.len() > *remaining_scan_bytes {
+        Vec::new()
+    } else {
+        *remaining_scan_bytes = remaining_scan_bytes.saturating_sub(source.len());
+        super::excerpts::query_windows(source, first_line, &pack.query, remaining_excerpt_bytes)
+    };
     for (excerpt, line_start, line_end) in &excerpts {
         let mut item = candidate.item.clone();
         item.text = format!("{source_path}:{line_start}-{line_end}\n{excerpt}");
@@ -93,7 +95,10 @@ fn admit_after_compacting_source(
 ) -> Result<bool, QueryError> {
     let original_items = pack.items.clone();
     let original_token_count = pack.token_count;
-    for item_index in (0..pack.items.len()).rev() {
+    let original_omitted = pack.omitted;
+    let mut best_excerpt_pack = None;
+    let mut complete_retries_remaining = COMPLETE_CANDIDATE_RETRY_LIMIT;
+    'existing_items: for item_index in (0..pack.items.len()).rev() {
         let Some(existing) = pack.items.get(item_index).cloned() else {
             continue;
         };
@@ -138,31 +143,66 @@ fn admit_after_compacting_source(
             if let Err(error) = finalize_count(pack, counter) {
                 pack.items = original_items;
                 pack.token_count = original_token_count;
+                pack.omitted = original_omitted;
                 return Err(error);
             }
-            for (candidate_excerpt, candidate_start, candidate_end) in candidate_excerpts {
-                let Some(candidate_path) = candidate.item.source_path.as_deref() else {
-                    continue;
-                };
-                let mut item = candidate.item.clone();
-                item.text = format!(
-                    "{candidate_path}:{candidate_start}-{candidate_end}\n{candidate_excerpt}"
-                );
-                item.line_start = Some(*candidate_start);
-                item.line_end = Some(*candidate_end);
-                match try_item(pack, item, omitted, counter) {
-                    Ok(true) => return Ok(true),
-                    Ok(false) => {}
-                    Err(error) => {
-                        pack.items = original_items;
-                        pack.token_count = original_token_count;
-                        return Err(error);
+            if complete_retries_remaining == 0 {
+                break 'existing_items;
+            }
+            complete_retries_remaining = complete_retries_remaining.saturating_sub(1);
+            match try_item(pack, candidate.item.clone(), omitted, counter) {
+                Ok(true) => return Ok(true),
+                Ok(false) => {}
+                Err(error) => {
+                    pack.items = original_items;
+                    pack.token_count = original_token_count;
+                    pack.omitted = original_omitted;
+                    return Err(error);
+                }
+            }
+            if best_excerpt_pack.is_none() {
+                for (candidate_excerpt, candidate_start, candidate_end) in candidate_excerpts {
+                    let Some(candidate_path) = candidate.item.source_path.as_deref() else {
+                        continue;
+                    };
+                    let mut item = candidate.item.clone();
+                    item.text = format!(
+                        "{candidate_path}:{candidate_start}-{candidate_end}\n{candidate_excerpt}"
+                    );
+                    item.line_start = Some(*candidate_start);
+                    item.line_end = Some(*candidate_end);
+                    let previous_len = pack.items.len();
+                    let previous_count = pack.token_count;
+                    let previous_omitted = pack.omitted;
+                    match try_item(pack, item, omitted, counter) {
+                        Ok(true) => {
+                            best_excerpt_pack = Some(pack.clone());
+                            pack.items.truncate(previous_len);
+                            pack.token_count = previous_count;
+                            pack.omitted = previous_omitted;
+                            break;
+                        }
+                        Ok(false) => {}
+                        Err(error) => {
+                            pack.items = original_items;
+                            pack.token_count = original_token_count;
+                            pack.omitted = original_omitted;
+                            return Err(error);
+                        }
                     }
                 }
             }
+            if complete_retries_remaining == 0 {
+                break 'existing_items;
+            }
         }
+    }
+    if let Some(best_excerpt_pack) = best_excerpt_pack {
+        *pack = best_excerpt_pack;
+        return Ok(true);
     }
     pack.items = original_items;
     pack.token_count = original_token_count;
+    pack.omitted = original_omitted;
     Ok(false)
 }

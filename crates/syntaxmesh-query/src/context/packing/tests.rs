@@ -36,7 +36,7 @@ fn pack(token_budget: u64) -> ContextPack {
 }
 
 fn source_candidate(source: &str) -> Candidate {
-    let id = NodeId::derive(&[b"excerpt-pack-node"]);
+    let id = NodeId::derive(&[b"excerpt-pack-node", source.as_bytes()]);
     let line_end = u32::try_from(source.lines().count()).unwrap_or(u32::MAX);
     Candidate {
         kind: ContextItemKind::SourceEvidence,
@@ -128,18 +128,24 @@ fn candidate_keeps_complete_source_when_it_fits() -> Result<(), crate::QueryErro
 }
 
 #[test]
-fn candidate_compacts_lower_priority_source_only_when_budget_requires_it()
+fn candidate_retries_complete_source_after_compacting_lower_priority_evidence()
 -> Result<(), crate::QueryError> {
     let unrelated = "let unrelated_value = 1234567890; ".repeat(4);
     let mut earlier_lines = vec![unrelated; 24];
-    earlier_lines.push("check_expected_version_and_apply_state_reducer();".to_owned());
+    earlier_lines.push("expected version reducer;".to_owned());
     let earlier = source_candidate(&earlier_lines.join("\n"));
+    let later_line = format!("let other_unrelated_value = {}", "x".repeat(64));
     let later = source_candidate(
-        &std::iter::repeat_n("let other_unrelated_value = 9876543210;", 15)
-            .chain(std::iter::once("apply_expected_version_state_reducer();"))
+        &std::iter::repeat_n(later_line.as_str(), 6)
+            .chain(std::iter::once("expected version reducer;"))
             .collect::<Vec<_>>()
             .join("\n"),
     );
+    if later.item.text.len() <= 512 {
+        return Err(crate::QueryError::Context(
+            "complete-source retry fixture must exercise the long-span path".to_owned(),
+        ));
+    }
     let mut context = pack(16 * 1024);
     assert!(try_item(
         &mut context,
@@ -147,7 +153,13 @@ fn candidate_compacts_lower_priority_source_only_when_budget_requires_it()
         OmittedContextSummary::default(),
         &ByteCounter,
     )?);
-    context.token_budget = 2048;
+    context.token_budget = 2300;
+    assert!(!try_item(
+        &mut context.clone(),
+        later.item.clone(),
+        OmittedContextSummary::default(),
+        &ByteCounter,
+    )?);
     let mut scan_bytes = 8 * 1024 * 1024;
     let mut excerpt_bytes = 256 * 1024;
     if !try_candidate(
@@ -167,14 +179,95 @@ fn candidate_compacts_lower_priority_source_only_when_budget_requires_it()
             .items
             .first()
             .is_none_or(|item| !item.text.contains("[…]"))
-        || context.items.get(1).is_none_or(|item| {
-            item.node_ids != later.item.node_ids || !item.text.contains("expected_version")
-        })
+        || context
+            .items
+            .get(1)
+            .is_none_or(|item| item.node_ids != later.item.node_ids || item.text != later.item.text)
         || context.token_count > context.token_budget
     {
+        return Err(crate::QueryError::Context(format!(
+            "source compaction changed identity, order, or budget: first={:?}, second={:?}, tokens={}/{}",
+            context.items.first().map(|item| &item.text),
+            context.items.get(1).map(|item| &item.text),
+            context.token_count,
+            context.token_budget
+        )));
+    }
+    Ok(())
+}
+
+#[test]
+fn short_complete_candidate_is_retried_after_compacting_existing_source()
+-> Result<(), crate::QueryError> {
+    let mut earlier_lines = vec!["unrelated source evidence with repeated words".to_owned(); 24];
+    earlier_lines.push("expected version reducer;".to_owned());
+    let earlier = source_candidate(&earlier_lines.join("\n"));
+    let later = source_candidate("expected_version reducer");
+    let mut context = pack(16 * 1024);
+    assert!(try_item(
+        &mut context,
+        earlier.item,
+        OmittedContextSummary::default(),
+        &ByteCounter,
+    )?);
+
+    let mut complete = context.clone();
+    complete.token_budget = u64::MAX;
+    assert!(try_item(
+        &mut complete,
+        later.item.clone(),
+        OmittedContextSummary::default(),
+        &ByteCounter,
+    )?);
+    let mut token_budget = complete.token_count;
+    loop {
+        token_budget = token_budget.saturating_sub(1);
+        let mut trial = context.clone();
+        trial.token_budget = token_budget;
+        if !try_item(
+            &mut trial,
+            later.item.clone(),
+            OmittedContextSummary::default(),
+            &ByteCounter,
+        )? {
+            break;
+        }
+    }
+    context.token_budget = token_budget;
+    let mut scan_bytes = 8 * 1024 * 1024;
+    let mut excerpt_bytes = 256 * 1024;
+
+    if !try_candidate(
+        &mut context,
+        &later,
+        OmittedContextSummary::default(),
+        &ByteCounter,
+        &mut scan_bytes,
+        &mut excerpt_bytes,
+    )? {
         return Err(crate::QueryError::Context(
-            "source compaction changed identity, order, or budget".to_owned(),
+            "short complete candidate was not retried after compaction".to_owned(),
         ));
+    }
+    let Some(compacted) = context.items.first() else {
+        return Err(crate::QueryError::Context(
+            "compacted source evidence is missing".to_owned(),
+        ));
+    };
+    let Some(admitted) = context.items.get(1) else {
+        return Err(crate::QueryError::Context(
+            "complete short candidate is missing".to_owned(),
+        ));
+    };
+    if !compacted.text.contains("[…]")
+        || admitted.text != later.item.text
+        || admitted.node_ids != later.item.node_ids
+        || context.token_count > context.token_budget
+    {
+        return Err(crate::QueryError::Context(format!(
+            "bad compacted/admitted items: compacted={:?}, admitted={:?}, tokens={}/{}",
+            compacted.text, admitted.text, context.token_count, context.token_budget
+        )));
     }
     Ok(())
 }

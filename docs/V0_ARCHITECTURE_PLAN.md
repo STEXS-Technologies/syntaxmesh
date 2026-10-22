@@ -4,6 +4,22 @@ Status: active implementation plan; last updated 2026-10-22. The two source-of-t
 
 ## 1. Scope and release distinction
 
+### Context packer compaction retry (2026-10-22)
+
+[ADR-0387](adr/0387-retry-complete-evidence-after-compaction.md) fixes a
+selected-evidence omission: after reclaiming space from lower-priority source
+items, the packer now retries the next candidate's complete source before
+falling back to its excerpts. The retry is bounded to six complete-candidate
+attempts, remains reversible, and leaves candidate selection, order, token
+accounting, and public representations unchanged. Focused regression tests
+cover both short and long candidates; all four packing tests, Query strict
+Clippy, and formatting pass. A one-run selected Shardline sample improved from
+6/7 to 7/7 targets at 2,048 tokens and from 6/7 to 7/7 at 8,192 tokens relative
+to the prior cap-4 iteration. Median query latency was 1.09 s and 2.19 s,
+respectively. This is a bounded iteration signal on a dirty selected fixture,
+not a repository-wide relevance or performance claim. Raw evidence is retained
+under ignored `target/context-retrieval-results/`.
+
 ### Current execution priority: the complete v0–v5 vision
 
 [ADR-0365](adr/0365-registered-inference-stream-setup.md) closes the missing

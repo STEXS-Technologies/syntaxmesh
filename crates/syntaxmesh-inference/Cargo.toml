@@ -1,0 +1,22 @@
+[package]
+name = "syntaxmesh-inference"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Pure bounded inference over explicit generation-scoped premises"
+
+[dependencies]
+syntaxmesh-core.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+blake3.workspace = true
+syntaxmesh-lang-rust.workspace = true
+syntaxmesh-language-sdk.workspace = true
+syntaxmesh-resolver.workspace = true
+
+[lints]
+workspace = true

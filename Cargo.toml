@@ -1,5 +1,46 @@
 [workspace]
 resolver = "3"
+default-members = [
+    "crates/syntaxmesh-core",
+    "crates/syntaxmesh-api-model",
+    "crates/syntaxmesh-runtime-protocol",
+    "crates/syntaxmesh-extension-sdk",
+    "crates/syntaxmesh-extension-ipc",
+    "crates/syntaxmesh-semantic",
+    "crates/syntaxmesh-store",
+    "crates/syntaxmesh-language-sdk",
+    "crates/syntaxmesh-resolver",
+    "crates/syntaxmesh-lang-rust",
+    "crates/syntaxmesh-lang-python",
+    "crates/syntaxmesh-lang-ecmascript",
+    "crates/syntaxmesh-lang-bash",
+    "crates/syntaxmesh-lang-docs",
+    "crates/syntaxmesh-indexer",
+    "crates/syntaxmesh-query",
+    "crates/syntaxmesh-cli",
+    "crates/syntaxmesh-workflow",
+    "crates/syntaxmesh-integration-penelope",
+    "crates/syntaxmesh-integration-statechronicle",
+    "crates/syntaxmesh-engine",
+    "crates/syntaxmesh-graph",
+    "crates/syntaxmesh-inference",
+    "crates/syntaxmesh-inference-sqlite",
+    "crates/syntaxmesh-inference-host",
+    "crates/syntaxmesh-store-turso",
+    "crates/syntaxmesh-store-sqlite",
+    "crates/syntaxmesh-analytics",
+    "crates/syntaxmesh-analytics-parquet",
+    "crates/syntaxmesh-scanner",
+    "xtask",
+    "crates/syntaxmesh-mcp",
+    "crates/syntaxmesh-http",
+    "crates/syntaxmesh-context-host",
+    "crates/syntaxmesh-watch",
+    "crates/syntaxmesh-watch-host",
+    "crates/syntaxmesh-source-host",
+    "crates/syntaxmesh-ownership-host",
+    "crates/syntaxmesh-daemon",
+]
 members = [
     "crates/syntaxmesh-core",
     "crates/syntaxmesh-api-model",
@@ -23,6 +64,9 @@ members = [
     "crates/syntaxmesh-integration-statechronicle",
     "crates/syntaxmesh-engine",
     "crates/syntaxmesh-graph",
+    "crates/syntaxmesh-inference",
+    "crates/syntaxmesh-inference-sqlite",
+    "crates/syntaxmesh-inference-host",
     "crates/syntaxmesh-store-turso",
     "crates/syntaxmesh-store-sqlite",
     "crates/syntaxmesh-analytics",
@@ -49,6 +93,9 @@ license = "MIT OR Apache-2.0"
 repository = "https://github.com/STEXS-Technologies/syntaxmesh"
 
 [workspace.dependencies]
+syntaxmesh-inference = { path = "crates/syntaxmesh-inference" }
+syntaxmesh-inference-sqlite = { path = "crates/syntaxmesh-inference-sqlite" }
+syntaxmesh-inference-host = { path = "crates/syntaxmesh-inference-host" }
 axum = { version = "0.8.9", default-features = false, features = ["http1", "json", "query", "tokio"] }
 base64 = { version = "0.23.1", default-features = false, features = ["std"] }
 blake3 = "1"
@@ -62,7 +109,7 @@ petgraph = { version = "0.8.3", default-features = false, features = ["std", "gr
 arrow-array = "58.4.0"
 arrow-schema = "58.4.0"
 parquet = { version = "58.4.0", default-features = false, features = ["arrow"] }
-duckdb = { version = "~1.10505.0", features = ["parquet", "appender-arrow"] }
+duckdb = { version = "~1.10506.1", features = ["parquet", "appender-arrow"] }
 tempfile = "3"
 regex = "1"
 toml = "1.1.6"

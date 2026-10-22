@@ -1,0 +1,17 @@
+[package]
+name = "syntaxmesh-inference-host"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Operator-scoped retained inference admission shared by hosts"
+
+[dependencies]
+syntaxmesh-api-model.workspace = true
+syntaxmesh-core.workspace = true
+syntaxmesh-inference.workspace = true
+syntaxmesh-inference-sqlite.workspace = true
+
+[lints]
+workspace = true

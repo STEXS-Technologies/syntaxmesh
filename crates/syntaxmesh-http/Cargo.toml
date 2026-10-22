@@ -7,6 +7,9 @@ license.workspace = true
 repository.workspace = true
 description = "Read-only loopback HTTP host for SyntaxMesh"
 
+[features]
+inference-sqlite = ["dep:syntaxmesh-inference-host", "syntaxmesh-engine/inference-sqlite"]
+
 [dependencies]
 axum.workspace = true
 hex.workspace = true
@@ -16,6 +19,7 @@ syntaxmesh-api-model.workspace = true
 syntaxmesh-core.workspace = true
 syntaxmesh-context-host.workspace = true
 syntaxmesh-engine.workspace = true
+syntaxmesh-inference-host = { workspace = true, optional = true }
 syntaxmesh-lang-rust.workspace = true
 syntaxmesh-language-sdk.workspace = true
 syntaxmesh-query.workspace = true
@@ -24,6 +28,8 @@ syntaxmesh-store-turso.workspace = true
 tokio = { workspace = true, features = ["net", "sync", "signal"] }
 
 [dev-dependencies]
+syntaxmesh-inference.workspace = true
+syntaxmesh-inference-sqlite.workspace = true
 base64.workspace = true
 syntaxmesh-source-host = { path = "../syntaxmesh-source-host" }
 syntaxmesh-watch-host = { path = "../syntaxmesh-watch-host" }

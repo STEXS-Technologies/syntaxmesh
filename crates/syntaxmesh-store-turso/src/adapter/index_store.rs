@@ -1,7 +1,7 @@
 //! Runtime-neutral GraphStore port implementation over Turso.
 
 use super::*;
-use syntaxmesh_core::FileVersion;
+use syntaxmesh_core::{FactVersionRef, FileVersion};
 
 impl GraphStore for TursoGraphStore {
     fn current_generation(
@@ -233,6 +233,57 @@ impl GraphStore for TursoGraphStore {
     fn fact_history(&self, fact: FactRef) -> Result<Vec<FactHistoryVersion>, StoreError> {
         self.runtime
             .block_on(read_fact_history(&self.connection, fact))
+            .map_err(Self::map_backend)
+    }
+
+    fn fact_version_exists(&self, version: FactVersionRef) -> Result<bool, StoreError> {
+        self.runtime
+            .block_on(async {
+                let (kind, id) = syntaxmesh_store::fact_storage_key(version.fact);
+                let mut rows = self
+                    .connection
+                    .query(
+                        "SELECT 1 FROM syntaxmesh_fact_versions WHERE fact_kind = ?1 AND fact_id = ?2 AND valid_from_sequence = (SELECT sequence FROM syntaxmesh_generation_history WHERE generation = ?3) LIMIT 1",
+                        (kind, id, version.valid_from.0.0.to_vec()),
+                    )
+                    .await
+                    .map_err(|error| TursoStoreError::Backend(format!("check fact version: {error}")))?;
+                rows.next()
+                    .await
+                    .map(|row| row.is_some())
+                    .map_err(|error| TursoStoreError::Backend(format!("read fact version: {error}")))
+            })
+            .map_err(Self::map_backend)
+    }
+
+    fn fact_version_validity(
+        &self,
+        version: FactVersionRef,
+    ) -> Result<Option<syntaxmesh_store::FactVersionValidity>, StoreError> {
+        self.runtime
+            .block_on(async {
+                let (kind, id) = syntaxmesh_store::fact_storage_key(version.fact);
+                let mut rows = self.connection.query(
+                    "SELECT versions.valid_until_sequence, end_entry.payload FROM syntaxmesh_fact_versions AS versions JOIN syntaxmesh_generation_history AS start_entry ON start_entry.generation = ?3 LEFT JOIN syntaxmesh_generation_history AS end_entry ON end_entry.sequence = versions.valid_until_sequence WHERE versions.fact_kind = ?1 AND versions.fact_id = ?2 AND versions.valid_from_sequence = start_entry.sequence",
+                    (kind, id, version.valid_from.0.0.to_vec()),
+                ).await.map_err(|error| TursoStoreError::Backend(format!("read fact-version validity: {error}")))?;
+                let Some(row) = rows.next().await.map_err(|error| TursoStoreError::Backend(format!("read fact-version validity row: {error}")))? else {
+                    return Ok(None);
+                };
+                let end_sequence = row.get_value(0).map_err(|error| TursoStoreError::Backend(format!("read fact-version end sequence: {error}")))?;
+                let end_payload = row.get_value(1).map_err(|error| TursoStoreError::Backend(format!("read fact-version end generation: {error}")))?;
+                let valid_until = match (end_sequence, end_payload) {
+                    (turso::Value::Null, turso::Value::Null) => None,
+                    (turso::Value::Integer(_), payload @ turso::Value::Blob(_)) => {
+                        Some(decode_blob::<GenerationHistoryEntry>(payload, "fact-version end generation")?.manifest.generation)
+                    }
+                    (sequence, payload) => return Err(TursoStoreError::Snapshot(format!("fact-version end sequence and generation payload disagree: {sequence:?}, {payload:?}"))),
+                };
+                Ok(Some(syntaxmesh_store::FactVersionValidity {
+                    valid_from: version.valid_from,
+                    valid_until,
+                }))
+            })
             .map_err(Self::map_backend)
     }
 

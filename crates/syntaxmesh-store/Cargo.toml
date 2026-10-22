@@ -10,6 +10,7 @@ repository.workspace = true
 benchmark-instrumentation = []
 
 [dependencies]
+auto_impl = "1.4"
 bincode.workspace = true
 blake3.workspace = true
 imbl.workspace = true

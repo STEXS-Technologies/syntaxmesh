@@ -6,6 +6,9 @@ rust-version.workspace = true
 license.workspace = true
 description = "Runtime-neutral SyntaxMesh application engine"
 
+[features]
+inference-sqlite = ["dep:syntaxmesh-inference", "dep:syntaxmesh-inference-sqlite", "syntaxmesh-integration-penelope/inference-sqlite"]
+
 [dependencies]
 blake3.workspace = true
 serde_json.workspace = true
@@ -13,6 +16,8 @@ serde.workspace = true
 syntaxmesh-core.workspace = true
 syntaxmesh-extension-sdk.workspace = true
 syntaxmesh-indexer.workspace = true
+syntaxmesh-inference-sqlite = { workspace = true, optional = true }
+syntaxmesh-inference = { workspace = true, optional = true }
 syntaxmesh-integration-penelope.workspace = true
 syntaxmesh-integration-statechronicle.workspace = true
 syntaxmesh-lang-rust.workspace = true
@@ -24,6 +29,9 @@ syntaxmesh-store.workspace = true
 syntaxmesh-workflow.workspace = true
 
 [dev-dependencies]
+syntaxmesh-inference.workspace = true
+syntaxmesh-store-turso.workspace = true
+syntaxmesh-store-sqlite.workspace = true
 tempfile.workspace = true
 syntaxmesh-extension-ipc = { path = "../syntaxmesh-extension-ipc" }
 syntaxmesh-api-model.workspace = true

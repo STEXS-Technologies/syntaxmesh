@@ -212,7 +212,18 @@ fn exercise_stdio(source_content: bool, lexical_first: bool) -> Result<(), Box<d
         .iter()
         .filter_map(|tool| tool.get("name").and_then(Value::as_str))
         .collect::<Vec<_>>();
-    if names != ["context", "neighbors", "node", "path", "search", "status"] {
+    if names
+        != [
+            "context",
+            "inference_checkpoint",
+            "inference_claims_page",
+            "neighbors",
+            "node",
+            "path",
+            "search",
+            "status",
+        ]
+    {
         return Err(std::io::Error::other(format!("unexpected MCP tools: {names:?}")).into());
     }
 

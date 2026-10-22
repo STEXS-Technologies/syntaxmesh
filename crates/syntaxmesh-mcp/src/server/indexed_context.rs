@@ -7,7 +7,7 @@ use syntaxmesh_api_model::{ContextPack, ContextRequest};
 use syntaxmesh_language_sdk::LanguageExtractor;
 use syntaxmesh_query::{
     ContextSourceProvider, ContextTokenCounter, DiscoveryPackingPreference, LexicalPlanRequest,
-    Query, SourceRolePackingRequest, SourceRolePreference,
+    Query, SourceRolePackingRequest, SourceRolePreference, SourceSpanIndexLimits,
 };
 use syntaxmesh_store_turso::TursoGraphStore;
 
@@ -81,9 +81,27 @@ pub(super) fn compile(
         .map_err(|error| format!("planner cache lock is poisoned: {error}"))?
         .get_or_build(&manifest, || {
             if policy.source_content {
-                return query
-                    .build_source_content_planner_index(1_000_000, 8_000_000, 256 * 1024 * 1024)
-                    .map_err(|error| error.to_string());
+                return if historical {
+                    query.build_source_content_planner_index(
+                        1_000_000,
+                        8_000_000,
+                        256 * 1024 * 1024,
+                    )
+                } else {
+                    query.build_source_span_planner_index(
+                        source,
+                        SourceSpanIndexLimits {
+                            node_budget: 1_000_000,
+                            posting_budget: 8_000_000,
+                            payload_budget: 256 * 1024 * 1024,
+                            source_span_budget: 1_000_000,
+                            source_byte_budget: 64 * 1024 * 1024,
+                            source_posting_budget: 8_000_000,
+                            source_payload_budget: 256 * 1024 * 1024,
+                        },
+                    )
+                }
+                .map_err(|error| error.to_string());
             }
             query
                 .build_planner_identifier_index(1_000_000, 8_000_000, 256 * 1024 * 1024)

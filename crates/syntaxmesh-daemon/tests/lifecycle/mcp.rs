@@ -15,15 +15,20 @@ fn tool_json(result: rmcp::model::CallToolResult) -> Result<Value, Box<dyn Error
 #[test]
 fn daemon_mcp_transport_refreshes_with_watch_and_preserves_http_boundary()
 -> Result<(), Box<dyn Error>> {
-    exercise_daemon_mcp(true)
+    exercise_daemon_mcp(true, false)
 }
 
 #[test]
 fn daemon_mcp_transport_refreshes_with_native_watch() -> Result<(), Box<dyn Error>> {
-    exercise_daemon_mcp(false)
+    exercise_daemon_mcp(false, false)
 }
 
-fn exercise_daemon_mcp(polling: bool) -> Result<(), Box<dyn Error>> {
+#[test]
+fn daemon_indexed_mcp_policies_preserve_transport_and_watch() -> Result<(), Box<dyn Error>> {
+    exercise_daemon_mcp(true, true)
+}
+
+fn exercise_daemon_mcp(polling: bool, indexed: bool) -> Result<(), Box<dyn Error>> {
     let fixture = tempfile::tempdir()?;
     let root = fixture.path().join("source");
     std::fs::create_dir(&root)?;
@@ -31,7 +36,13 @@ fn exercise_daemon_mcp(polling: bool) -> Result<(), Box<dyn Error>> {
     std::fs::write(&file, "pub fn protocol_before() {}")?;
     let database = fixture.path().join("graph.db");
     TursoGraphStore::migrate(&database)?;
-    let (mut process, base) = start_with_mcp(&root, &database, polling, true)?;
+    let extra: &[&str] = if indexed {
+        &["--source-content-context", "--lexical-first-context"]
+    } else {
+        &[]
+    };
+    let (mut process, base) =
+        start_with_extra_options(&root, &database, polling, true, true, Some("5000"), extra)?;
     let client = Client::builder()
         .no_proxy()
         .timeout(Duration::from_secs(2))
@@ -103,6 +114,24 @@ fn exercise_daemon_mcp(polling: bool) -> Result<(), Box<dyn Error>> {
             return Err::<(), Box<dyn Error>>("MCP protocol initial search missing".into());
         }
         let old = generation(&initial)?.to_owned();
+        if indexed {
+            let context = tool_json(
+                service
+                    .peer()
+                    .call_tool(CallToolRequestParams::new("context").with_arguments(
+                        serde_json::from_value(serde_json::json!({
+                            "query": "protocol_before", "token_budget": 8192,
+                        }))?,
+                    ))
+                    .await?,
+            )?;
+            let pack: syntaxmesh_api_model::ContextPack = serde_json::from_value(context)?;
+            if pack.generation.0.to_hex() != old || pack.items.is_empty() {
+                return Err::<(), Box<dyn Error>>(
+                    "configured MCP returned no pinned context".into(),
+                );
+            }
+        }
         std::fs::write(&file, "pub fn protocol_after() {}")?;
         let waiting = Instant::now();
         loop {

@@ -15,7 +15,12 @@ name = "semantic_command"
 path = "tests/semantic_command.rs"
 harness = false
 
+[features]
+inference-sqlite = ["dep:syntaxmesh-inference", "dep:syntaxmesh-inference-sqlite", "syntaxmesh-engine/inference-sqlite"]
+
 [dependencies]
+syntaxmesh-inference = { workspace = true, optional = true }
+syntaxmesh-inference-sqlite = { workspace = true, optional = true }
 ctrlc = { version = "3.5.2", features = ["termination"] }
 syntaxmesh-watch = { path = "../syntaxmesh-watch" }
 syntaxmesh-watch-host = { path = "../syntaxmesh-watch-host" }

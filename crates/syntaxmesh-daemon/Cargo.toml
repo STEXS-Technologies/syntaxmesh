@@ -7,12 +7,32 @@ license.workspace = true
 repository.workspace = true
 description = "Shared-owner SyntaxMesh daemon host"
 
+[features]
+inference-sqlite = [
+    "dep:serde",
+    "dep:serde_json",
+    "dep:syntaxmesh-api-model",
+    "dep:syntaxmesh-core",
+    "dep:syntaxmesh-inference-host",
+    "dep:syntaxmesh-inference-sqlite",
+    "syntaxmesh-http/inference-sqlite",
+    "syntaxmesh-mcp/inference-sqlite",
+]
+
 [[bin]]
 name = "syntaxmeshd"
 path = "src/main.rs"
 
 [dependencies]
+syntaxmesh-engine.workspace = true
+syntaxmesh-query.workspace = true
 axum.workspace = true
+serde = { workspace = true, optional = true }
+serde_json = { workspace = true, optional = true }
+syntaxmesh-api-model = { workspace = true, optional = true }
+syntaxmesh-core = { workspace = true, optional = true }
+syntaxmesh-inference-host = { workspace = true, optional = true }
+syntaxmesh-inference-sqlite = { workspace = true, optional = true }
 rmcp = { workspace = true, features = ["transport-streamable-http-server"] }
 syntaxmesh-mcp = { path = "../syntaxmesh-mcp" }
 ctrlc = { version = "3.5.2", features = ["termination"] }
@@ -25,7 +45,9 @@ syntaxmesh-store-turso.workspace = true
 tokio = { workspace = true, features = ["net", "sync"] }
 
 [dev-dependencies]
+syntaxmesh-api-model.workspace = true
 syntaxmesh-core.workspace = true
+syntaxmesh-inference.workspace = true
 syntaxmesh-store.workspace = true
 rmcp = { workspace = true, features = ["client", "transport-streamable-http-client-reqwest"] }
 reqwest = { workspace = true, features = ["query"] }

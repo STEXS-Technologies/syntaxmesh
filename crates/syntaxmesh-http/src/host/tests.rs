@@ -16,6 +16,8 @@ mod context;
 mod diagnostics;
 mod files;
 mod history;
+#[cfg(feature = "inference-sqlite")]
+mod inference;
 mod live;
 mod neighborhood;
 mod neighbors;

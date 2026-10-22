@@ -24,7 +24,11 @@ use syntaxmesh_workflow::{
     WorkflowRejectionPage, WorkflowStatus,
 };
 
+#[cfg(feature = "inference-sqlite")]
+mod inference;
 mod integrity;
+#[cfg(feature = "inference-sqlite")]
+pub use inference::InferenceRecovery;
 mod semantic;
 #[cfg(test)]
 mod tests;

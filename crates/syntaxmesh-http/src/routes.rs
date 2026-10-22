@@ -15,6 +15,8 @@ mod context;
 mod diagnostics;
 mod files;
 mod history;
+#[cfg(feature = "inference-sqlite")]
+mod inference;
 mod integrity;
 mod neighborhood;
 mod neighbors;
@@ -51,7 +53,7 @@ pub(crate) fn router<E: LanguageExtractor + Send + 'static>(
         authority,
         owner_instance: host.owner_instance.clone(),
     };
-    Router::new()
+    let router = Router::new()
         .route(
             "/healthz",
             get(|| async { Json(json!({"schema_version": 1, "status": "alive"})) }),
@@ -83,7 +85,18 @@ pub(crate) fn router<E: LanguageExtractor + Send + 'static>(
         .route(
             "/api/v1/nodes/{id}/neighborhood",
             get(neighborhood::neighborhood::<E>),
+        );
+    #[cfg(feature = "inference-sqlite")]
+    let router = router
+        .route(
+            "/api/v1/inference/checkpoint",
+            post(inference::checkpoint::<E>).layer(axum::extract::DefaultBodyLimit::max(16 * 1024)),
         )
+        .route(
+            "/api/v1/inference/claims-page",
+            post(inference::page::<E>).layer(axum::extract::DefaultBodyLimit::max(16 * 1024)),
+        );
+    router
         .with_state(host)
         .merge(additional)
         .layer(middleware::from_fn_with_state(boundary_state, boundary))

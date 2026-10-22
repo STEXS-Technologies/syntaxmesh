@@ -7,9 +7,11 @@ license.workspace = true
 repository.workspace = true
 
 [features]
+inference = ["dep:syntaxmesh-inference"]
 benchmark-instrumentation = ["syntaxmesh-store/benchmark-instrumentation"]
 
 [dependencies]
+syntaxmesh-inference = { workspace = true, optional = true }
 blake3.workspace = true
 serde_json.workspace = true
 rust-stemmers = "=1.2.0"
@@ -21,3 +23,6 @@ syntaxmesh-store.workspace = true
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

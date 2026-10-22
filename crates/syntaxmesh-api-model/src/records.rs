@@ -9,7 +9,7 @@ use syntaxmesh_core::{
 };
 
 pub const GRAPH_EXPORT_SCHEMA_VERSION: u32 = 7;
-pub const TEMPORAL_EXPORT_SCHEMA_VERSION: u32 = 11;
+pub const TEMPORAL_EXPORT_SCHEMA_VERSION: u32 = 13;
 pub const ACCEPTANCE_TIMELINE_SCHEMA_VERSION: u32 = 2;
 pub const HISTORICAL_NEIGHBORHOOD_SCHEMA_VERSION: u32 = 1;
 pub const CONSEQUENCE_TRACE_SCHEMA_VERSION: u32 = 1;
@@ -271,6 +271,22 @@ pub enum TemporalRecord {
         query_mode: TemporalQueryMode,
         event: syntaxmesh_core::ChangeEvent,
     },
+    /// The accepted transition that opened one exact canonical fact-version.
+    /// This is version-introduction lineage, not a claim about cross-fact cause.
+    FactVersionIntroduction {
+        schema_version: u32,
+        query_mode: TemporalQueryMode,
+        version: FactVersionRef,
+        event: syntaxmesh_core::ChangeEvent,
+    },
+    /// The accepted transition that ended one exact canonical fact-version.
+    /// This records direct transition membership, not semantic resolution.
+    FactVersionRetirement {
+        schema_version: u32,
+        query_mode: TemporalQueryMode,
+        version: FactVersionRef,
+        event: syntaxmesh_core::ChangeEvent,
+    },
     /// Pagination status for a fact-linked change-event page.
     ChangeEventFooter {
         schema_version: u32,
@@ -464,8 +480,72 @@ mod tests {
             },
         };
         let line = record.to_json_line().unwrap_or_default();
-        assert!(line.contains("\"schema_version\":11"));
+        assert!(line.contains("\"schema_version\":13"));
         assert!(line.contains("\"query_mode\":\"historical_conclusion\""));
+        assert!(serde_json::from_str::<TemporalRecord>(&line).is_ok_and(|parsed| parsed == record));
+    }
+
+    #[test]
+    fn fact_version_introduction_round_trips_without_claiming_causality() {
+        let generation = GenerationId::derive(&[b"introduction-generation"]);
+        let fact =
+            syntaxmesh_core::FactRef::Node(syntaxmesh_core::NodeId::derive(&[b"introduced-node"]));
+        let version = FactVersionRef {
+            fact,
+            valid_from: generation,
+        };
+        let event = syntaxmesh_core::ChangeEvent {
+            id: syntaxmesh_core::ChangeEventId::derive(&[b"introduction-event"]),
+            repository: RepositoryId::derive(&[b"introduction-repository"]),
+            worktree: syntaxmesh_core::WorktreeId::derive(&[b"introduction-worktree"]),
+            generation_before: None,
+            generation_after: generation,
+            changed_facts: vec![syntaxmesh_core::ChangedFact {
+                fact,
+                kind: syntaxmesh_core::FactChangeKind::Added,
+            }],
+        };
+        let record = TemporalRecord::FactVersionIntroduction {
+            schema_version: TEMPORAL_EXPORT_SCHEMA_VERSION,
+            query_mode: TemporalQueryMode::HistoricalConclusion,
+            version,
+            event,
+        };
+        let line = record.to_json_line().unwrap_or_default();
+        assert!(line.contains("\"schema_version\":13"));
+        assert!(!line.contains("caused"));
+        assert!(serde_json::from_str::<TemporalRecord>(&line).is_ok_and(|parsed| parsed == record));
+    }
+
+    #[test]
+    fn fact_version_retirement_round_trips_without_claiming_resolution() {
+        let generation = GenerationId::derive(&[b"retirement-generation"]);
+        let fact =
+            syntaxmesh_core::FactRef::Node(syntaxmesh_core::NodeId::derive(&[b"retired-node"]));
+        let version = FactVersionRef {
+            fact,
+            valid_from: GenerationId::derive(&[b"retirement-version-start"]),
+        };
+        let event = syntaxmesh_core::ChangeEvent {
+            id: syntaxmesh_core::ChangeEventId::derive(&[b"retirement-event"]),
+            repository: RepositoryId::derive(&[b"retirement-repository"]),
+            worktree: syntaxmesh_core::WorktreeId::derive(&[b"retirement-worktree"]),
+            generation_before: Some(version.valid_from),
+            generation_after: generation,
+            changed_facts: vec![syntaxmesh_core::ChangedFact {
+                fact,
+                kind: syntaxmesh_core::FactChangeKind::Removed,
+            }],
+        };
+        let record = TemporalRecord::FactVersionRetirement {
+            schema_version: TEMPORAL_EXPORT_SCHEMA_VERSION,
+            query_mode: TemporalQueryMode::HistoricalConclusion,
+            version,
+            event,
+        };
+        let line = record.to_json_line().unwrap_or_default();
+        assert!(line.contains("\"schema_version\":13"));
+        assert!(!line.contains("resolved"));
         assert!(serde_json::from_str::<TemporalRecord>(&line).is_ok_and(|parsed| parsed == record));
     }
 
@@ -517,7 +597,7 @@ mod tests {
         };
         for record in [item, footer] {
             let line = record.to_json_line().unwrap_or_default();
-            assert!(line.contains("\"schema_version\":11"));
+            assert!(line.contains("\"schema_version\":13"));
             assert!(
                 serde_json::from_str::<TemporalRecord>(&line).is_ok_and(|parsed| parsed == record)
             );
@@ -622,7 +702,7 @@ mod tests {
         ];
         for record in records {
             let line = record.to_json_line().unwrap_or_default();
-            assert!(line.contains("\"schema_version\":11"));
+            assert!(line.contains("\"schema_version\":13"));
             assert!(serde_json::from_str::<TemporalRecord>(&line).is_ok_and(|p| p == record));
         }
     }
@@ -738,7 +818,7 @@ mod tests {
             accepted_at: Some(AcceptanceTime(123)),
         };
         let line = record.to_json_line().unwrap_or_default();
-        assert!(line.contains("\"schema_version\":11"));
+        assert!(line.contains("\"schema_version\":13"));
         assert!(line.contains("\"type\":\"fact_supersedes\""));
         assert!(serde_json::from_str::<TemporalRecord>(&line).is_ok_and(|parsed| parsed == record));
     }
@@ -774,7 +854,7 @@ mod tests {
         ];
         for record in records {
             let line = record.to_json_line().unwrap_or_default();
-            assert!(line.contains("\"schema_version\":11"));
+            assert!(line.contains("\"schema_version\":13"));
             assert!(line.contains("\"query_mode\":\"historical_conclusion\""));
             assert!(
                 serde_json::from_str::<TemporalRecord>(&line).is_ok_and(|parsed| parsed == record)
@@ -845,7 +925,7 @@ mod tests {
         ];
         for record in records {
             let line = record.to_json_line().unwrap_or_default();
-            assert!(line.contains("\"schema_version\":11"));
+            assert!(line.contains("\"schema_version\":13"));
             assert!(line.contains("\"query_mode\":\"historical_conclusion\""));
             assert!(
                 serde_json::from_str::<TemporalRecord>(&line).is_ok_and(|parsed| parsed == record)
@@ -885,7 +965,7 @@ mod tests {
         ];
         for record in records {
             let line = record.to_json_line().unwrap_or_default();
-            assert!(line.contains("\"schema_version\":11"));
+            assert!(line.contains("\"schema_version\":13"));
             assert!(line.contains("\"query_mode\":\"historical_conclusion\""));
             assert!(
                 serde_json::from_str::<TemporalRecord>(&line).is_ok_and(|parsed| parsed == record)

@@ -89,6 +89,54 @@ struct ContextArgs {
     max_candidates: Option<u16>,
 }
 
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct InferenceCheckpointArgs {
+    schema_version: u32,
+    #[schemars(length(max = 128))]
+    binding: String,
+    #[schemars(length(max = 64))]
+    generation: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct InferenceCursorArgs {
+    #[schemars(length(max = 128))]
+    binding: String,
+    #[schemars(length(max = 64))]
+    stream: String,
+    #[schemars(length(max = 64))]
+    repository: String,
+    #[schemars(length(max = 64))]
+    worktree: String,
+    #[schemars(length(max = 64))]
+    generation: String,
+    #[schemars(length(max = 64))]
+    root: Option<String>,
+    #[schemars(length(max = 64))]
+    after: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct InferencePageArgs {
+    schema_version: u32,
+    #[schemars(length(max = 128))]
+    binding: String,
+    #[schemars(length(max = 64))]
+    generation: String,
+    #[schemars(range(min = 1))]
+    claims: u64,
+    #[schemars(range(min = 1))]
+    payload_bytes: u64,
+    #[schemars(range(min = 1))]
+    premises: u64,
+    #[schemars(range(min = 1))]
+    tree_pages: u64,
+    cursor: Option<InferenceCursorArgs>,
+}
+
 #[derive(Clone)]
 struct ExactTiktokenCounter {
     inner: syntaxmesh_context_host::ExactTiktokenCounter,
@@ -138,6 +186,10 @@ pub struct SyntaxMeshMcp<E: LanguageExtractor = RustExtractor> {
     source_role_preference: syntaxmesh_query::SourceRolePreference,
     discovery_preference: syntaxmesh_query::DiscoveryPackingPreference,
     planner_cache: Arc<Mutex<planner_cache::PlannerCache>>,
+    #[cfg(feature = "inference-sqlite")]
+    inference: Option<Arc<syntaxmesh_inference_host::InferenceReadBindings>>,
+    #[cfg(feature = "inference-sqlite")]
+    inference_admission: Arc<tokio::sync::Semaphore>,
 }
 
 impl SyntaxMeshMcp {
@@ -174,7 +226,29 @@ impl SyntaxMeshMcp {
             source_role_preference: syntaxmesh_query::SourceRolePreference::Neutral,
             discovery_preference: syntaxmesh_query::DiscoveryPackingPreference::Balanced,
             planner_cache: Arc::new(Mutex::new(planner_cache::PlannerCache::new())),
+            #[cfg(feature = "inference-sqlite")]
+            inference: None,
+            #[cfg(feature = "inference-sqlite")]
+            inference_admission: Arc::new(tokio::sync::Semaphore::new(16)),
         })
+    }
+}
+
+#[cfg(feature = "inference-sqlite")]
+impl<E: LanguageExtractor + Send + 'static> SyntaxMeshMcp<E> {
+    /// Install operator-configured retained inference reads after host creation.
+    ///
+    /// # Errors
+    /// Rejects a registry outside this MCP host's repository/worktree scope.
+    pub fn with_inference(
+        mut self,
+        bindings: syntaxmesh_inference_host::InferenceReadBindings,
+    ) -> Result<Self, String> {
+        if bindings.scope() != (self.repository, self.worktree) {
+            return Err("inference registry outside MCP host scope".to_owned());
+        }
+        self.inference = Some(Arc::new(bindings));
+        Ok(self)
     }
 }
 
@@ -193,6 +267,10 @@ impl<E: LanguageExtractor> Clone for SyntaxMeshMcp<E> {
             source_role_preference: self.source_role_preference,
             discovery_preference: self.discovery_preference,
             planner_cache: Arc::clone(&self.planner_cache),
+            #[cfg(feature = "inference-sqlite")]
+            inference: self.inference.clone(),
+            #[cfg(feature = "inference-sqlite")]
+            inference_admission: Arc::clone(&self.inference_admission),
         }
     }
 }
@@ -233,6 +311,10 @@ impl<E: LanguageExtractor + Send + 'static> SyntaxMeshMcp<E> {
             source_role_preference: syntaxmesh_query::SourceRolePreference::Neutral,
             discovery_preference: syntaxmesh_query::DiscoveryPackingPreference::Balanced,
             planner_cache: Arc::new(Mutex::new(planner_cache::PlannerCache::new())),
+            #[cfg(feature = "inference-sqlite")]
+            inference: None,
+            #[cfg(feature = "inference-sqlite")]
+            inference_admission: Arc::new(tokio::sync::Semaphore::new(16)),
         })
     }
 
@@ -282,6 +364,19 @@ impl<E: LanguageExtractor + Send + 'static> SyntaxMeshMcp<E> {
             ))
         })?;
         Ok(NodeId(StableId(bytes)))
+    }
+
+    #[cfg(feature = "inference-sqlite")]
+    fn parse_generation_id(value: &str) -> Result<GenerationId, McpError> {
+        let bytes = hex::decode(value)
+            .map_err(|error| Self::input_error(format!("invalid generation ID: {error}")))?;
+        let bytes: [u8; 32] = bytes.try_into().map_err(|bytes: Vec<u8>| {
+            Self::input_error(format!(
+                "generation ID must contain 32 bytes, got {}",
+                bytes.len()
+            ))
+        })?;
+        Ok(GenerationId(StableId(bytes)))
     }
 
     fn ensure_selected_scope(
@@ -605,6 +700,178 @@ impl<E: LanguageExtractor + Send + 'static> SyntaxMeshMcp<E> {
         })
         .await
         .and_then(|value| Self::result(&value))
+    }
+
+    #[tool(
+        description = "Read one explicitly selected retained inference checkpoint from an operator-configured binding."
+    )]
+    async fn inference_checkpoint(
+        &self,
+        Parameters(args): Parameters<InferenceCheckpointArgs>,
+    ) -> Result<CallToolResult, McpError> {
+        #[cfg(not(feature = "inference-sqlite"))]
+        {
+            let _ = (args.schema_version, args.binding, args.generation);
+            return Err(Self::tool_error(
+                "inference reads are not enabled in this build",
+            ));
+        }
+        #[cfg(feature = "inference-sqlite")]
+        {
+            let bindings = self
+                .inference
+                .as_ref()
+                .ok_or_else(|| Self::tool_error("inference reads are not configured"))?;
+            let request = syntaxmesh_api_model::InferenceCheckpointRequest {
+                schema_version: args.schema_version,
+                binding: args.binding,
+                generation: Self::parse_generation_id(&args.generation)?,
+            };
+            bindings.checkpoint(&request).map_err(Self::input_error)?;
+            let permit = Arc::clone(&self.inference_admission)
+                .try_acquire_owned()
+                .map_err(|_error| Self::tool_error("inference read capacity is busy"))?;
+            let bindings = Arc::clone(bindings);
+            self.with_engine(move |engine| {
+                let _permit = permit;
+                let (database, origin, generation) = bindings.checkpoint(&request)?;
+                let checkpoint = engine
+                    .inference_checkpoint(database, origin, generation)
+                    .map_err(|error| error.to_string())?
+                    .map(syntaxmesh_inference_host::inference_checkpoint_record)
+                    .transpose()?;
+                serde_json::to_value(syntaxmesh_api_model::InferenceCheckpointResponse {
+                    schema_version: syntaxmesh_api_model::INFERENCE_READ_SCHEMA_VERSION,
+                    binding: request.binding,
+                    generation,
+                    checkpoint,
+                })
+                .map_err(|error| format!("encode inference checkpoint: {error}"))
+            })
+            .await
+            .and_then(|value| Self::result(&value))
+        }
+    }
+
+    #[tool(
+        description = "Read a bounded page of exact retained inference claims from an operator-configured binding."
+    )]
+    async fn inference_claims_page(
+        &self,
+        Parameters(args): Parameters<InferencePageArgs>,
+    ) -> Result<CallToolResult, McpError> {
+        #[cfg(not(feature = "inference-sqlite"))]
+        {
+            let InferencePageArgs {
+                schema_version,
+                binding,
+                generation,
+                claims,
+                payload_bytes,
+                premises,
+                tree_pages,
+                cursor,
+            } = args;
+            let _ = (
+                schema_version,
+                binding,
+                generation,
+                claims,
+                payload_bytes,
+                premises,
+                tree_pages,
+            );
+            if let Some(cursor) = cursor {
+                let InferenceCursorArgs {
+                    binding: cursor_binding,
+                    stream,
+                    repository,
+                    worktree,
+                    generation: cursor_generation,
+                    root,
+                    after,
+                } = cursor;
+                let _ = (
+                    cursor_binding,
+                    stream,
+                    repository,
+                    worktree,
+                    cursor_generation,
+                    root,
+                    after,
+                );
+            }
+            return Err(Self::tool_error(
+                "inference reads are not enabled in this build",
+            ));
+        }
+        #[cfg(feature = "inference-sqlite")]
+        {
+            let bindings = self
+                .inference
+                .as_ref()
+                .ok_or_else(|| Self::tool_error("inference reads are not configured"))?;
+            let cursor = args
+                .cursor
+                .map(|cursor| {
+                    Ok(syntaxmesh_api_model::InferencePageCursor {
+                        binding: cursor.binding,
+                        stream: Self::parse_node_id(&cursor.stream)?.0,
+                        selection: syntaxmesh_api_model::InferenceSelection {
+                            repository: RepositoryId(Self::parse_node_id(&cursor.repository)?.0),
+                            worktree: WorktreeId(Self::parse_node_id(&cursor.worktree)?.0),
+                            generation: Self::parse_generation_id(&cursor.generation)?,
+                        },
+                        root: cursor
+                            .root
+                            .map(|root| Self::parse_node_id(&root).map(|node| node.0))
+                            .transpose()?,
+                        after: Self::parse_node_id(&cursor.after)?.0,
+                    })
+                })
+                .transpose()?;
+            let request = syntaxmesh_api_model::InferencePageRequest {
+                schema_version: args.schema_version,
+                binding: args.binding,
+                generation: Self::parse_generation_id(&args.generation)?,
+                limits: syntaxmesh_api_model::InferencePageLimits {
+                    claims: args.claims,
+                    payload_bytes: args.payload_bytes,
+                    premises: args.premises,
+                    tree_pages: args.tree_pages,
+                },
+                cursor,
+            };
+            bindings.page(&request).map_err(Self::input_error)?;
+            let permit = Arc::clone(&self.inference_admission)
+                .try_acquire_owned()
+                .map_err(|_error| Self::tool_error("inference read capacity is busy"))?;
+            let bindings = Arc::clone(bindings);
+            self.with_engine(move |engine| {
+                let _permit = permit;
+                let admitted = bindings.page(&request)?;
+                if engine
+                    .inference_checkpoint(
+                        admitted.database,
+                        admitted.request.origin,
+                        request.generation,
+                    )
+                    .map_err(|error| error.to_string())?
+                    .is_none()
+                {
+                    return Err("inference checkpoint is not retained".to_owned());
+                }
+                let page = engine
+                    .inference_claims_page(admitted.database, &admitted.request)
+                    .map_err(|error| error.to_string())?;
+                let response =
+                    syntaxmesh_inference_host::inference_page_response(request.binding, page)?;
+                serde_json::to_value(response)
+                    .map_err(|error| format!("encode inference page: {error}"))
+            })
+            .await
+            .and_then(|value| Self::result(&value))
+        }
     }
 }
 

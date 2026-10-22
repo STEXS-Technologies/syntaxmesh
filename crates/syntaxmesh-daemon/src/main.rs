@@ -1,4 +1,6 @@
 mod host;
+#[cfg(feature = "inference-sqlite")]
+mod inference_config;
 mod options;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {

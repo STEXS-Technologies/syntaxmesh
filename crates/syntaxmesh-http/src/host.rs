@@ -18,6 +18,9 @@ use tokio::sync::Semaphore;
 #[cfg(test)]
 mod tests;
 
+#[cfg(feature = "inference-sqlite")]
+mod inference;
+
 /// Read-only host, startup-pinned by default or live with a shared Engine.
 /// Keep a clone or shared Engine reference outside the host runtime
 /// until shutdown so the Turso adapter's runtime is dropped synchronously.
@@ -30,6 +33,8 @@ pub struct SyntaxMeshHttp<E: LanguageExtractor = RustExtractor> {
     pub(crate) context: Option<(RepositorySourceReader, ExactTiktokenCounter)>,
     live: bool,
     pub(crate) owner_instance: Option<axum::http::HeaderValue>,
+    #[cfg(feature = "inference-sqlite")]
+    inference: Option<Arc<syntaxmesh_inference_host::InferenceReadBindings>>,
 }
 
 impl SyntaxMeshHttp {
@@ -53,6 +58,8 @@ impl SyntaxMeshHttp {
             context: None,
             live: false,
             owner_instance: None,
+            #[cfg(feature = "inference-sqlite")]
+            inference: None,
         })
     }
 }
@@ -85,6 +92,8 @@ impl<E: LanguageExtractor + Send + 'static> SyntaxMeshHttp<E> {
             context: None,
             live: true,
             owner_instance: None,
+            #[cfg(feature = "inference-sqlite")]
+            inference: None,
         })
     }
 
@@ -331,6 +340,8 @@ impl<E: LanguageExtractor> Clone for SyntaxMeshHttp<E> {
             context: self.context.clone(),
             live: self.live,
             owner_instance: self.owner_instance.clone(),
+            #[cfg(feature = "inference-sqlite")]
+            inference: self.inference.clone(),
         }
     }
 }

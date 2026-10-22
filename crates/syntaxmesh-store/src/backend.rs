@@ -129,6 +129,13 @@ pub struct FactHistoryVersion {
     pub payload: FactPayload,
 }
 
+/// Exact generation-validity interval for one retained fact version.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FactVersionValidity {
+    pub valid_from: GenerationId,
+    pub valid_until: Option<GenerationId>,
+}
+
 /// One canonical fact version selected by its producer-reported event time.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ObservedFactVersion {
@@ -536,6 +543,7 @@ fn acceptance_record_key(generation: GenerationId) -> String {
 
 /// Logical behavior shared by Turso and the SQLite reference backend.
 /// Implementations decide how to provide a consistent read snapshot.
+#[auto_impl::auto_impl(&mut)]
 pub trait GraphStore {
     /// Read the last published manifest for one repository worktree.
     ///
@@ -1625,6 +1633,39 @@ pub trait GraphStore {
         Ok(versions)
     }
 
+    /// Check whether one exact canonical fact-version start is retained.
+    ///
+    /// Durable backends should use the `(fact kind, identity, start generation)`
+    /// key; the reference implementation scans only that fact's versions.
+    ///
+    /// # Errors
+    /// Returns a store error if retained fact history is unavailable or malformed.
+    fn fact_version_exists(&self, version: FactVersionRef) -> Result<bool, StoreError> {
+        Ok(self
+            .fact_history(version.fact)?
+            .iter()
+            .any(|retained| retained.valid_from == version.valid_from))
+    }
+
+    /// Resolve the validity interval for one exact retained fact version.
+    /// Durable stores should seek the fact identity and start-generation key.
+    ///
+    /// # Errors
+    /// Returns an error if retained history is unavailable or malformed.
+    fn fact_version_validity(
+        &self,
+        version: FactVersionRef,
+    ) -> Result<Option<FactVersionValidity>, StoreError> {
+        Ok(self
+            .fact_history(version.fact)?
+            .into_iter()
+            .find(|retained| retained.valid_from == version.valid_from)
+            .map(|retained| FactVersionValidity {
+                valid_from: retained.valid_from,
+                valid_until: retained.valid_until,
+            }))
+    }
+
     /// Return only the exact versions of `fact` opened or closed at one
     /// accepted generation. An update normally returns the old and new
     /// versions; a deletion returns the closed version; an unchanged fact
@@ -2289,6 +2330,7 @@ pub struct DurableRecordPage {
     pub next_cursor: Option<String>,
 }
 
+#[auto_impl::auto_impl(&mut)]
 pub trait DurableRecordStore {
     /// Reads the exact record identified by a namespaced key.
     ///

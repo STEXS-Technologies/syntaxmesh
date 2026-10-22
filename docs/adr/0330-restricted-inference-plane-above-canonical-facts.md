@@ -1,6 +1,50 @@
 # ADR-0330: Restricted inference above canonical facts
 
-Status: proposed; no public inference contract or implementation yet.
+Status: initial pure evaluator implemented; host, source integration and release gates open.
+
+## Initial evaluator contract
+
+The first pure evaluator accepts scoped, generation-labeled edge premises and
+node identities, plus one explicit rule: a nonempty path of one relation, joined
+to a second relation and a terminal concept-declaration relation. Rule identity,
+version, ontology versions and configuration fingerprint are explicit inputs.
+Each separate supporting witness produces a derived claim with exact edge
+version premises, scope and generation. Output relations must be extension-owned.
+The initial schema-1 identity hashes domain-separated deterministic JSON of the complete rule,
+scope, generation, output endpoints and ordered witness; JSON here is an in-memory
+identity encoding, not storage or service communication.
+
+ADR-0335 advances this optional claim identity to schema 2, incorporating an
+explicit deterministic derivation class. Canonical source IDs are unchanged.
+
+Input facts, edge visits, path depth and outputs have mandatory positive bounds.
+Repeated nodes in a witness are detected and skipped; acyclic depth exhaustion
+fails rather than returning an apparently complete prefix. Generation labels and
+duplicate/dangling facts reject before execution. A pure evaluator cannot verify
+ancestry of premise valid-from values: the future host must obtain them from
+authoritative retained versions, not manufacture them from current edge IDs.
+No durable materialization, ontology discovery or general rule language is implied.
+
+The initial path/join tests pass for transitive witnesses, input-order invariance,
+premise removal, identity changes and fail-closed work/depth/output limits and
+mixed generations. Architecture dependency checks pass with inference explicitly
+classified as pure/runtime-neutral. Supported-language extraction integration,
+cycle/invalid-input fixtures and full contributor CI remain required; this is
+not yet a delivered end-to-end reasoning workflow.
+
+Follow-up verification: five unit tests and one real Rust extractor/resolver
+integration pass. The extracted checkout/payment/writer call path combines with
+explicit domain declarations to yield an exact four-premise witness. Removing
+the declaration removes claims without removing source call facts. Cycles skip
+repeating nodes while preserving finite witnesses; duplicate and dangling facts,
+generation mismatches, reserved outputs and exhausted bounds reject. Strict
+all-target inference Clippy and architecture checks pass. This fixture labels
+fresh extraction versions itself, not authoritative durable history; retained
+version host integration and durable premise invalidation remain open.
+
+Contributor CI for the pure evaluator and real Rust integration passes in
+146.19 seconds. The later optional Query adapter is outside that completed test
+run and requires its own lifecycle verification (ADR-0331).
 
 ## Requirement and existing boundary
 

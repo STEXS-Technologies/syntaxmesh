@@ -437,6 +437,7 @@ fn cli_help_is_available_without_arguments_and_for_help_flags() -> Result<(), Bo
             || !stdout.contains("syntaxmesh graph-at-known-by-turso")
             || !stdout.contains("syntaxmesh neighborhood-at[-turso]")
             || !stdout.contains("syntaxmesh fact-lineage-turso")
+            || !stdout.contains("syntaxmesh fact-version-origin-turso")
             || !stdout.contains("syntaxmesh change-set-events[-turso]")
             || !stdout.contains("syntaxmesh consequence-trace[-turso]")
             || !stdout.contains("syntaxmesh sqlite-migrate")
@@ -2474,7 +2475,7 @@ fn file_and_turso_cli_export_same_identity_fact_lineage() -> Result<(), Box<dyn 
             .arg(history_command)
             .arg(store_path)
             .arg("node")
-            .arg(node_id)
+            .arg(&node_id)
             .output()?;
         if !lineage.status.success() {
             return Err(std::io::Error::other(format!(
@@ -2507,6 +2508,95 @@ fn file_and_turso_cli_export_same_identity_fact_lineage() -> Result<(), Box<dyn 
             return Err(std::io::Error::other(format!(
                 "{history_command} did not expose the indexed same-identity version link: lineage={records}; history={}",
                 String::from_utf8_lossy(&fact_history.stdout)
+            ))
+            .into());
+        }
+        let fact_history_command = if index_command == "index" {
+            "fact-history"
+        } else {
+            "fact-history-turso"
+        };
+        let history_output = Command::new(env!("CARGO_BIN_EXE_syntaxmesh"))
+            .arg(fact_history_command)
+            .arg(store_path)
+            .arg("node")
+            .arg(&node_id)
+            .output()?;
+        if !history_output.status.success() {
+            return Err(std::io::Error::other(format!(
+                "{fact_history_command} query failed: {}",
+                String::from_utf8_lossy(&history_output.stderr)
+            ))
+            .into());
+        }
+        let history_text = String::from_utf8(history_output.stdout)?;
+        let valid_froms = history_text
+            .lines()
+            .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+            .filter_map(|record| {
+                record
+                    .get("valid_from")
+                    .and_then(serde_json::Value::as_array)
+                    .and_then(|bytes| {
+                        bytes
+                            .iter()
+                            .map(serde_json::Value::as_u64)
+                            .map(|byte| byte.and_then(|byte| u8::try_from(byte).ok()))
+                            .collect::<Option<Vec<_>>>()
+                    })
+                    .map(hex::encode)
+            })
+            .collect::<Vec<_>>();
+        let valid_from = valid_froms.last().ok_or_else(|| {
+            std::io::Error::other(format!(
+                "fact history did not contain a version: {history_text}"
+            ))
+        })?;
+        let origin_command = if index_command == "index" {
+            "fact-version-origin"
+        } else {
+            "fact-version-origin-turso"
+        };
+        let origin = Command::new(env!("CARGO_BIN_EXE_syntaxmesh"))
+            .arg(origin_command)
+            .arg(store_path)
+            .arg("node")
+            .arg(&node_id)
+            .arg(valid_from)
+            .output()?;
+        let origin_stdout = String::from_utf8(origin.stdout)?;
+        if !origin.status.success()
+            || !origin_stdout.contains("\"type\":\"fact_version_introduction\"")
+        {
+            return Err(std::io::Error::other(format!(
+                "{origin_command} did not expose the fact version introduction: status={}, stdout={origin_stdout}, stderr={}",
+                origin.status,
+                String::from_utf8_lossy(&origin.stderr)
+            ))
+            .into());
+        }
+        let retirement_command = if index_command == "index" {
+            "fact-version-retirement"
+        } else {
+            "fact-version-retirement-turso"
+        };
+        let retirement = Command::new(env!("CARGO_BIN_EXE_syntaxmesh"))
+            .arg(retirement_command)
+            .arg(store_path)
+            .arg("node")
+            .arg(&node_id)
+            .arg(valid_froms.first().ok_or_else(|| {
+                std::io::Error::other("fact history did not contain its first version")
+            })?)
+            .output()?;
+        let retirement_stdout = String::from_utf8(retirement.stdout)?;
+        if !retirement.status.success()
+            || !retirement_stdout.contains("\"type\":\"fact_version_retirement\"")
+        {
+            return Err(std::io::Error::other(format!(
+                "{retirement_command} did not expose the fact version retirement: status={}, stdout={retirement_stdout}, stderr={}",
+                retirement.status,
+                String::from_utf8_lossy(&retirement.stderr)
             ))
             .into());
         }

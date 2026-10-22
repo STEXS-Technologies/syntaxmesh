@@ -2,18 +2,24 @@ use std::ffi::OsString;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::time::Duration;
+use syntaxmesh_engine::SourceSyntaxPolicy;
 use syntaxmesh_watch_host::WatchLoopOptions;
 
-pub(super) const USAGE: &str = "usage: syntaxmeshd <source-root> <migrated-turso-database> <loopback-address:port> [--verify] [--poll-only] [--reconcile-ms <positive-ms>] [--watch-duration-ms <positive-ms>] [--context-tokenizer <cl100k_base|o200k_base>] [--mcp]";
+pub(super) const USAGE: &str = "usage: syntaxmeshd <source-root> <migrated-turso-database> <loopback-address:port> [--verify] [--record-syntax-failures] [--poll-only] [--reconcile-ms <positive-ms>] [--watch-duration-ms <positive-ms>] [--context-tokenizer <cl100k_base|o200k_base>] [--mcp] [--source-content-context] [--lexical-first-context] [--inference-read-config <path> (inference-sqlite feature)]";
 
 pub(super) struct Options {
     pub root: PathBuf,
     pub database: PathBuf,
     pub address: SocketAddr,
     pub verify: bool,
+    pub syntax_policy: SourceSyntaxPolicy,
     pub watch: WatchLoopOptions,
     pub tokenizer: Option<String>,
     pub mcp: bool,
+    pub source_content_context: bool,
+    pub lexical_first_context: bool,
+    #[cfg(feature = "inference-sqlite")]
+    pub inference_read_config: Option<PathBuf>,
 }
 
 pub(super) fn parse(
@@ -40,15 +46,48 @@ pub(super) fn parse(
         database: database.into(),
         address,
         verify: false,
+        syntax_policy: SourceSyntaxPolicy::Strict,
         watch: WatchLoopOptions::default(),
         tokenizer: None,
         mcp: false,
+        source_content_context: false,
+        lexical_first_context: false,
+        #[cfg(feature = "inference-sqlite")]
+        inference_read_config: None,
     };
     while let Some(argument) = arguments.next() {
         if argument == "--verify" && !options.verify {
             options.verify = true;
+        } else if argument == "--record-syntax-failures"
+            && options.syntax_policy == SourceSyntaxPolicy::Strict
+        {
+            options.syntax_policy = SourceSyntaxPolicy::RecordFailures;
         } else if argument == "--mcp" && !options.mcp {
             options.mcp = true;
+        } else if argument == "--source-content-context" && !options.source_content_context {
+            options.source_content_context = true;
+        } else if argument == "--lexical-first-context" && !options.lexical_first_context {
+            options.lexical_first_context = true;
+        } else if argument == "--inference-read-config" {
+            #[cfg(feature = "inference-sqlite")]
+            {
+                if options.inference_read_config.is_some() {
+                    return Err("duplicate daemon inference read config option".to_owned());
+                }
+                options.inference_read_config = Some(
+                    arguments
+                        .next()
+                        .map(PathBuf::from)
+                        .ok_or("missing inference read configuration path")?,
+                );
+            }
+            #[cfg(not(feature = "inference-sqlite"))]
+            {
+                return Err(
+                    "--inference-read-config requires the inference-sqlite build feature"
+                        .to_owned(),
+                );
+            }
         } else if argument == "--poll-only" && !options.watch.poll_only {
             options.watch.poll_only = true;
         } else if argument == "--reconcile-ms" || argument == "--watch-duration-ms" {
@@ -82,5 +121,11 @@ pub(super) fn parse(
     if options.mcp && options.tokenizer.is_none() {
         return Err("--mcp requires --context-tokenizer".to_owned());
     }
+    if (options.source_content_context || options.lexical_first_context) && !options.mcp {
+        return Err("indexed MCP context options require --mcp".to_owned());
+    }
     Ok(Some(options))
 }
+
+#[cfg(test)]
+mod tests;

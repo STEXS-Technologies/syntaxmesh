@@ -316,6 +316,89 @@ fn verification_is_opt_in_and_preserves_durable_status() -> Result<(), EngineErr
 }
 
 #[test]
+fn verification_toggle_does_not_change_canonical_graph_or_query_results() -> Result<(), EngineError>
+{
+    let repository = RepositoryId::derive(&[b"verification-invariant-repository"]);
+    let worktree = WorktreeId::derive(&[b"verification-invariant-worktree"]);
+    let generation = GenerationId::derive(&[b"verification-invariant-generation"]);
+    let run_id = IndexRunId::derive(&[b"verification-invariant-run"]);
+    let content = "pub fn verification_invariant() -> usize { 42 }\n";
+    let file = SourceFile {
+        file: FileVersion {
+            file_id: FileId::derive(&[b"src/verification_invariant.rs"]),
+            normalized_path: "src/verification_invariant.rs".to_owned(),
+            content_hash: *blake3::hash(content.as_bytes()).as_bytes(),
+            size_bytes: content.len() as u64,
+        },
+        content: content.to_owned(),
+    };
+    let mut durable = SyntaxMeshEngine::new(
+        InMemoryGraphStore::new(),
+        RustExtractor,
+        repository,
+        worktree,
+    );
+    let durable_receipt = durable.index(std::slice::from_ref(&file), run_id, generation)?;
+    let mut verified = SyntaxMeshEngine::new(
+        InMemoryGraphStore::new(),
+        RustExtractor,
+        repository,
+        worktree,
+    )
+    .with_statechronicle_verification();
+    let verified_receipt = verified.index(&[file], run_id, generation)?;
+
+    let durable_store = durable.indexer.store();
+    let verified_store = verified.indexer.store();
+    let durable_manifest = durable_store.manifest(generation)?;
+    let mut verified_manifest = verified_store.manifest(generation)?;
+    verified_manifest.status = durable_manifest.status;
+    let durable_query = durable.query(generation);
+    let verified_query = verified.query(generation);
+    let durable_nodes = durable_store.nodes(generation)?;
+    let Some(query_target) = durable_nodes
+        .iter()
+        .find(|node| node.kind == NodeKind::Function)
+    else {
+        return Err(EngineError::Workflow(WorkflowError::Verification(
+            "verification invariant fixture omitted its function node".to_owned(),
+        )));
+    };
+    let durable_results = durable_query.search(&query_target.name, 16)?;
+    let verified_results = verified_query.search(&query_target.name, 16)?;
+    let same_nodes = durable_nodes == verified_store.nodes(generation)?;
+    let same_edges = durable_store.edges(generation)? == verified_store.edges(generation)?;
+    let same_files = durable_store.files(generation)? == verified_store.files(generation)?;
+    let same_provenance =
+        durable_store.provenance(generation)? == verified_store.provenance(generation)?;
+    let same_query = durable_results == verified_results;
+    let same_manifest = durable_manifest == verified_manifest;
+    let durable_status = durable_manifest.status == GenerationStatus::Durable;
+    let verified_status = verified_store
+        .current_generation(repository, worktree)?
+        .is_some_and(|manifest| manifest.status == GenerationStatus::Verified);
+    let durable_receipt_status = durable_receipt.verification == WorkflowStatus::Durable;
+    let verified_receipt_status = verified_receipt.verification == WorkflowStatus::Verified;
+
+    if !durable_receipt_status
+        || !verified_receipt_status
+        || !durable_status
+        || !verified_status
+        || !same_manifest
+        || !same_nodes
+        || !same_edges
+        || !same_files
+        || !same_provenance
+        || !same_query
+    {
+        return Err(EngineError::Workflow(WorkflowError::Verification(format!(
+            "StateChronicle opt-in changed canonical graph or query behavior: manifest={same_manifest}, nodes={same_nodes}, edges={same_edges}, files={same_files}, provenance={same_provenance}, query={same_query}, durable_status={durable_status}, verified_status={verified_status}, durable_receipt={durable_receipt_status}, verified_receipt={verified_receipt_status}"
+        ))));
+    }
+    Ok(())
+}
+
+#[test]
 fn prepared_explicit_lineage_uses_penelope_and_statechronicle_path() -> Result<(), EngineError> {
     let repository = RepositoryId::derive(&[b"lineage-engine-repo"]);
     let worktree = WorktreeId::derive(&[b"lineage-engine-worktree"]);

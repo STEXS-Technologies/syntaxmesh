@@ -1,6 +1,8 @@
+use std::collections::BTreeSet;
 use std::error::Error;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::ContentBlock;
@@ -20,6 +22,10 @@ mod corpus_probe;
 
 #[path = "indexed_context/tests.rs"]
 mod indexed_context_tests;
+
+#[cfg(feature = "inference-sqlite")]
+#[path = "tests/inference.rs"]
+mod inference_tests;
 
 pub(super) struct Fixture(tempfile::TempDir);
 
@@ -174,13 +180,35 @@ fn indexed_external_source_server(
     let database = root.join("graph.db");
     TursoGraphStore::migrate(&database)?;
     let scan = scan(&source_root, SUPPORTED_SOURCE_EXTENSIONS)?;
+    let scan_file_count = scan.files.len();
+    let tracked_paths = if whole_repository {
+        Some(tracked_source_paths(&source_root)?)
+    } else {
+        None
+    };
     let files = scan
         .files
         .into_iter()
         .filter(|file| {
-            whole_repository || selected_files.contains(&file.file.normalized_path.as_str())
+            tracked_paths.as_ref().map_or_else(
+                || selected_files.contains(&file.file.normalized_path.as_str()),
+                |tracked| tracked.contains(&file.file.normalized_path),
+            )
         })
         .collect::<Vec<_>>();
+    if let Some(tracked) = &tracked_paths {
+        eprintln!(
+            "context_repository_scope tracked_supported_files={} untracked_supported_files_excluded={}",
+            files.len(),
+            scan_file_count.saturating_sub(files.len())
+        );
+        if tracked.is_empty() {
+            return Err(std::io::Error::other(
+                "repository evaluation found no tracked supported source files",
+            )
+            .into());
+        }
+    }
     if selected_files.iter().any(|selected| {
         !files
             .iter()
@@ -249,6 +277,65 @@ fn indexed_external_source_server(
     ))
 }
 
+fn tracked_source_paths(source_root: &Path) -> Result<BTreeSet<String>, Box<dyn Error>> {
+    let output = Command::new("git")
+        .args(["ls-files", "--cached", "-z"])
+        .current_dir(source_root)
+        .output()?;
+    if !output.status.success() {
+        return Err(std::io::Error::other(format!(
+            "could not list tracked benchmark inputs in {}: {}",
+            source_root.display(),
+            String::from_utf8_lossy(&output.stderr).trim()
+        ))
+        .into());
+    }
+    output
+        .stdout
+        .split(|byte| *byte == 0)
+        .filter(|path| !path.is_empty())
+        .map(|path| {
+            String::from_utf8(path.to_vec())
+                .map_err(|error| std::io::Error::other(error.to_string()).into())
+        })
+        .collect()
+}
+
+#[test]
+fn repository_benchmark_inventory_excludes_untracked_generated_files() -> Result<(), Box<dyn Error>>
+{
+    let fixture = Fixture::new()?;
+    let root = fixture.0.path();
+    let init = Command::new("git")
+        .args(["init", "--quiet"])
+        .current_dir(root)
+        .status()?;
+    if !init.success() {
+        return Err(
+            std::io::Error::other("could not initialize benchmark inventory fixture").into(),
+        );
+    }
+    let add = Command::new("git")
+        .args(["add", "src/lib.rs"])
+        .current_dir(root)
+        .status()?;
+    if !add.success() {
+        return Err(
+            std::io::Error::other("could not track benchmark inventory fixture source").into(),
+        );
+    }
+    fs::create_dir_all(root.join("generated-reports"))?;
+    fs::write(root.join("generated-reports/REPORT.md"), "generated report")?;
+    let tracked = tracked_source_paths(root)?;
+    if tracked != BTreeSet::from(["src/lib.rs".to_owned()]) {
+        return Err(std::io::Error::other(format!(
+            "repository inventory included an untracked generated file: {tracked:?}"
+        ))
+        .into());
+    }
+    Ok(())
+}
+
 #[test]
 fn tool_discovery_exposes_only_read_tools() {
     let names = SyntaxMeshMcp::<RustExtractor>::tool_router()
@@ -258,7 +345,16 @@ fn tool_discovery_exposes_only_read_tools() {
         .collect::<Vec<_>>();
     assert_eq!(
         names,
-        ["context", "neighbors", "node", "path", "search", "status"]
+        [
+            "context",
+            "inference_checkpoint",
+            "inference_claims_page",
+            "neighbors",
+            "node",
+            "path",
+            "search",
+            "status"
+        ]
     );
 }
 

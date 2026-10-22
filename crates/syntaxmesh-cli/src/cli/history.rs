@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use syntaxmesh_core::{FactRef, GenerationId, NodeId};
+use syntaxmesh_core::{FactRef, FactVersionRef, GenerationId, NodeId};
 use syntaxmesh_engine::SyntaxMeshEngine;
 use syntaxmesh_lang_rust::RustExtractor;
 use syntaxmesh_store::{DurableRecordStore, GraphStore};
@@ -71,4 +71,70 @@ fn fact_lineage_engine<S: GraphStore + DurableRecordStore>(
         write_stdout(&link.to_json_line().map_err(CliError::Encode)?)?;
     }
     Ok(())
+}
+
+pub(super) fn fact_version_origin(
+    snapshot: &Path,
+    version: FactVersionRef,
+) -> Result<(), CliError> {
+    let (engine, generation) = file_engine(snapshot)?;
+    fact_version_origin_engine(&engine, generation, version)
+}
+
+pub(super) fn fact_version_origin_turso(
+    database: &Path,
+    version: FactVersionRef,
+) -> Result<(), CliError> {
+    let ownership = syntaxmesh_ownership_host::WriterLease::acquire(database)?;
+    let (engine, generation) = turso_engine(&ownership)?;
+    fact_version_origin_engine(&engine, generation, version)
+}
+
+pub(super) fn fact_version_retirement(
+    snapshot: &Path,
+    version: FactVersionRef,
+) -> Result<(), CliError> {
+    let (engine, generation) = file_engine(snapshot)?;
+    fact_version_retirement_engine(&engine, generation, version)
+}
+
+pub(super) fn fact_version_retirement_turso(
+    database: &Path,
+    version: FactVersionRef,
+) -> Result<(), CliError> {
+    let ownership = syntaxmesh_ownership_host::WriterLease::acquire(database)?;
+    let (engine, generation) = turso_engine(&ownership)?;
+    fact_version_retirement_engine(&engine, generation, version)
+}
+
+fn fact_version_retirement_engine<S: GraphStore + DurableRecordStore>(
+    engine: &SyntaxMeshEngine<S, RustExtractor>,
+    generation: GenerationId,
+    version: FactVersionRef,
+) -> Result<(), CliError> {
+    let record = engine
+        .query(generation)
+        .fact_version_retirement(version)?
+        .ok_or_else(|| {
+            CliError::Usage(format!(
+                "no retained retirement event for fact version {version:?}"
+            ))
+        })?;
+    write_stdout(&record.to_json_line().map_err(CliError::Encode)?)
+}
+
+fn fact_version_origin_engine<S: GraphStore + DurableRecordStore>(
+    engine: &SyntaxMeshEngine<S, RustExtractor>,
+    generation: GenerationId,
+    version: FactVersionRef,
+) -> Result<(), CliError> {
+    let record = engine
+        .query(generation)
+        .fact_version_introduction(version)?
+        .ok_or_else(|| {
+            CliError::Usage(format!(
+                "no retained introduction event for fact version {version:?}"
+            ))
+        })?;
+    write_stdout(&record.to_json_line().map_err(CliError::Encode)?)
 }

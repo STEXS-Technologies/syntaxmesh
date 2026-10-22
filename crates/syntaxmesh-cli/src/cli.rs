@@ -4,8 +4,8 @@ use std::path::Path;
 
 use syntaxmesh_api_model::{GRAPH_EXPORT_SCHEMA_VERSION, GraphRecord, TemporalQueryMode};
 use syntaxmesh_core::{
-    AcceptanceTime, AcceptedGenerationCursor, ChangeSetId, EventsForChangeSetCursor, GenerationId,
-    ObservedFactCursor,
+    AcceptanceTime, AcceptedGenerationCursor, ChangeSetId, EventsForChangeSetCursor,
+    FactVersionRef, GenerationId, ObservedFactCursor,
 };
 use syntaxmesh_engine::SyntaxMeshEngine;
 use syntaxmesh_lang_rust::RustExtractor;
@@ -25,6 +25,10 @@ mod graph;
 mod history;
 mod identifiers;
 mod indexing;
+#[cfg(feature = "inference-sqlite")]
+mod inference;
+#[cfg(feature = "inference-sqlite")]
+mod inference_config;
 mod ownership;
 mod processing;
 #[path = "project_config.rs"]
@@ -47,7 +51,9 @@ use graph::{
     parse_edge_direction, path, path_turso, subgraph, subgraph_turso,
 };
 use history::{
-    fact_history, fact_history_turso, fact_lineage, fact_lineage_turso, history, history_turso,
+    fact_history, fact_history_turso, fact_lineage, fact_lineage_turso, fact_version_origin,
+    fact_version_origin_turso, fact_version_retirement, fact_version_retirement_turso, history,
+    history_turso,
 };
 use identifiers::{
     parse_acceptance_time, parse_change_set_id, parse_consequence_seed, parse_edge_id,
@@ -83,6 +89,10 @@ Usage:\n\
   syntaxmesh fact-history-turso <database> <file|provenance|node|edge> <id>\n\
   syntaxmesh fact-lineage <snapshot> <file|provenance|node|edge> <id>\n\
   syntaxmesh fact-lineage-turso <database> <file|provenance|node|edge> <id>\n\
+  syntaxmesh fact-version-origin <snapshot> <file|provenance|node|edge> <id> <valid-from-generation>\n\
+  syntaxmesh fact-version-origin-turso <database> <file|provenance|node|edge> <id> <valid-from-generation>\n\
+  syntaxmesh fact-version-retirement <snapshot> <file|provenance|node|edge> <id> <valid-from-generation>\n\
+  syntaxmesh fact-version-retirement-turso <database> <file|provenance|node|edge> <id> <valid-from-generation>\n\
   syntaxmesh change-correlations[-turso] <store> <source-generation> <fact-kind> <fact-id> <limit> [after-generation]\n\
   syntaxmesh graph-at <snapshot> <generation>\n\
   syntaxmesh graph-at-turso <database> <generation>\n\
@@ -135,7 +145,28 @@ Default index paths: root is the current directory; snapshot is <root>/.syntaxme
 Project config: `syntaxmesh.toml` at <root> supports [history] verified = true and [module_resolution] profile = \"node\"";
 
 fn print_help() -> Result<(), CliError> {
-    write_stdout(CLI_HELP)
+    write_stdout(CLI_HELP)?;
+    #[cfg(feature = "inference-sqlite")]
+    write_stdout(
+        "  syntaxmesh inference-config-check <configuration.json>\n  syntaxmesh inference-migrate <inference.sqlite>\n  syntaxmesh inference-recover[-turso] <canonical-store>",
+    )?;
+    #[cfg(feature = "inference-sqlite")]
+    write_stdout(
+        "  syntaxmesh inference-setup[-turso] <canonical-store> <inference.sqlite> <generation-id> <configuration.json>",
+    )?;
+    #[cfg(feature = "inference-sqlite")]
+    write_stdout(
+        "  syntaxmesh inference-sync[-turso] <canonical-store> <inference.sqlite> <generation-id> <configuration.json> <origin.json>",
+    )?;
+    #[cfg(feature = "inference-sqlite")]
+    write_stdout(
+        "  syntaxmesh inference-checkpoint <inference.sqlite> <generation-id> <origin.json>",
+    )?;
+    #[cfg(feature = "inference-sqlite")]
+    write_stdout(
+        "  syntaxmesh inference-claims-page <inference.sqlite> <generation-id> <origin.json> <claims> <bytes> <premises> <tree-pages> [cursor.json]",
+    )?;
+    Ok(())
 }
 
 type FileEngine = SyntaxMeshEngine<FileGraphStore, RustExtractor>;
@@ -473,6 +504,38 @@ fn run(arguments: impl IntoIterator<Item = String>) -> Result<(), CliError> {
         return print_help();
     }
     match command.as_str() {
+        #[cfg(feature = "inference-sqlite")]
+        "inference-claims-page" => inference::page(arguments),
+        #[cfg(feature = "inference-sqlite")]
+        "inference-checkpoint" => inference::checkpoint(arguments),
+        #[cfg(feature = "inference-sqlite")]
+        "inference-sync" | "inference-sync-turso" => {
+            inference::synchronize(command.ends_with("-turso"), arguments)
+        }
+        #[cfg(feature = "inference-sqlite")]
+        "inference-setup" | "inference-setup-turso" => {
+            inference::setup(command.ends_with("-turso"), arguments)
+        }
+        #[cfg(feature = "inference-sqlite")]
+        "inference-migrate" | "inference-recover" | "inference-recover-turso" => {
+            inference::run(&command, arguments)
+        }
+        #[cfg(feature = "inference-sqlite")]
+        "inference-config-check" => {
+            let config = arguments.next().ok_or_else(|| {
+                CliError::Usage("inference-config-check <configuration.json>".to_owned())
+            })?;
+            if arguments.next().is_some() {
+                return Err(CliError::Usage(
+                    "inference-config-check <configuration.json>".to_owned(),
+                ));
+            }
+            let fingerprint = inference_config::check(Path::new(&config))?;
+            write_stdout(&format!(
+                "inference_configuration={}",
+                hex::encode(fingerprint.0)
+            ))
+        }
         "cycles" | "cycles-turso" => cycles::run(arguments, command == "cycles-turso"),
         "ingest-extension" | "ingest-extension-turso" => {
             extensions::ingest(arguments, command == "ingest-extension-turso")
@@ -589,6 +652,52 @@ fn run(arguments: impl IntoIterator<Item = String>) -> Result<(), CliError> {
                 _ => Err(CliError::Usage(format!(
                     "unsupported fact query: {command}"
                 ))),
+            }
+        }
+        "fact-version-origin" | "fact-version-origin-turso" => {
+            let store_path = arguments.next().ok_or_else(|| {
+                CliError::Usage(format!("{command} requires a snapshot/database path"))
+            })?;
+            let kind = arguments
+                .next()
+                .ok_or_else(|| CliError::Usage(format!("{command} requires a fact kind")))?;
+            let id = arguments
+                .next()
+                .ok_or_else(|| CliError::Usage(format!("{command} requires a fact ID")))?;
+            let valid_from = arguments.next().ok_or_else(|| {
+                CliError::Usage(format!("{command} requires a valid-from generation"))
+            })?;
+            let version = FactVersionRef {
+                fact: parse_fact_ref(&kind, &id)?,
+                valid_from: parse_generation_id(&valid_from)?,
+            };
+            if command == "fact-version-origin" {
+                fact_version_origin(Path::new(&store_path), version)
+            } else {
+                fact_version_origin_turso(Path::new(&store_path), version)
+            }
+        }
+        "fact-version-retirement" | "fact-version-retirement-turso" => {
+            let store_path = arguments.next().ok_or_else(|| {
+                CliError::Usage(format!("{command} requires a snapshot/database path"))
+            })?;
+            let kind = arguments
+                .next()
+                .ok_or_else(|| CliError::Usage(format!("{command} requires a fact kind")))?;
+            let id = arguments
+                .next()
+                .ok_or_else(|| CliError::Usage(format!("{command} requires a fact ID")))?;
+            let valid_from = arguments.next().ok_or_else(|| {
+                CliError::Usage(format!("{command} requires a valid-from generation"))
+            })?;
+            let version = FactVersionRef {
+                fact: parse_fact_ref(&kind, &id)?,
+                valid_from: parse_generation_id(&valid_from)?,
+            };
+            if command == "fact-version-retirement" {
+                fact_version_retirement(Path::new(&store_path), version)
+            } else {
+                fact_version_retirement_turso(Path::new(&store_path), version)
             }
         }
         "graph-at" | "graph-at-turso" => {

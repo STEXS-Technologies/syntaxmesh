@@ -9,6 +9,7 @@ description = "Read-only MCP host for SyntaxMesh graph queries"
 
 [features]
 benchmark-instrumentation = ["syntaxmesh-query/benchmark-instrumentation", "syntaxmesh-store-turso/benchmark-instrumentation"]
+inference-sqlite = ["dep:syntaxmesh-inference-host", "syntaxmesh-engine/inference-sqlite"]
 
 [[bin]]
 name = "syntaxmesh-mcp"
@@ -24,6 +25,7 @@ syntaxmesh-api-model.workspace = true
 syntaxmesh-core.workspace = true
 syntaxmesh-context-host.workspace = true
 syntaxmesh-engine.workspace = true
+syntaxmesh-inference-host = { workspace = true, optional = true }
 syntaxmesh-lang-rust.workspace = true
 syntaxmesh-language-sdk.workspace = true
 syntaxmesh-query.workspace = true
@@ -38,6 +40,9 @@ syntaxmesh-lang-docs.workspace = true
 syntaxmesh-lang-ecmascript.workspace = true
 syntaxmesh-lang-python.workspace = true
 syntaxmesh-scanner.workspace = true
+syntaxmesh-inference.workspace = true
+syntaxmesh-inference-sqlite.workspace = true
+syntaxmesh-store.workspace = true
 syntaxmesh-source-host = { path = "../syntaxmesh-source-host" }
 tempfile.workspace = true
 

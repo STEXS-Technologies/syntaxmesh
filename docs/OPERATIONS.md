@@ -1,8 +1,8 @@
 # Local operations runbook (v0)
 
-This runbook covers the current local CLI and embedded stores. SyntaxMesh is
-still at the first vertical slice; it does not yet provide a daemon, online
-backup command, or snapshot import command. Keep one writer per store at a time.
+This runbook covers the local CLI, shared-owner daemon and embedded stores.
+SyntaxMesh is still at the first vertical slice; it does not provide an online
+backup command or snapshot import command. Keep one writer per store at a time.
 
 ## Build the AI documentation graph
 

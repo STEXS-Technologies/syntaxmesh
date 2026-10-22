@@ -1,5 +1,7 @@
 //! Generation-scoped graph queries over the store port.
 
+#[cfg(feature = "inference")]
+mod inference;
 mod lexical_plans;
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
@@ -18,8 +20,9 @@ use syntaxmesh_core::{
     AcceptanceTime, AcceptedGenerationCursor, ChangeEventCorrelation, ChangeEventCorrelationCursor,
     ChangeEventCursor, ChangeSetId, ConsequenceEdge, ConsequenceEdgeCursor, ConsequenceEdgeId,
     ConsequenceEdgeVersion, ConsequenceKind, ConsequenceRangeCursor, Edge, EdgeDirection,
-    EventsForChangeSetCursor, EvidenceClass, FactRef, FactVersionRef, GenerationId, GraphSnapshot,
-    LineageEndpoint, Node, NodeId, ObservationTime, ObservedFactCursor, ProvenanceId,
+    EventsForChangeSetCursor, EvidenceClass, FactChangeKind, FactRef, FactVersionRef, GenerationId,
+    GraphSnapshot, LineageEndpoint, Node, NodeId, ObservationTime, ObservedFactCursor,
+    ProvenanceId,
 };
 use syntaxmesh_store::{
     ConsequenceEdgePage, ConsequenceRangePage, FactHistoryVersion, GenerationChange, GraphStore,
@@ -1164,6 +1167,92 @@ where
                 )
             })
             .collect())
+    }
+
+    /// Resolve the accepted transition that opened one exact fact version no
+    /// later than this query's generation.
+    ///
+    /// A result identifies transition membership only; it does not imply that
+    /// this transition caused another fact or event. `None` means no matching
+    /// retained change event is available for this version, as can occur for
+    /// imported history anchors.
+    ///
+    /// # Errors
+    /// Returns a store error when the version's generation is unknown or its
+    /// retained event cannot be decoded.
+    pub fn fact_version_introduction(
+        &self,
+        version: FactVersionRef,
+    ) -> Result<Option<TemporalRecord>, QueryError> {
+        let selected_sequence = self.store.generation_sequence(self.generation)?;
+        let version_sequence = self.store.generation_sequence(version.valid_from)?;
+        if version_sequence > selected_sequence {
+            return Ok(None);
+        }
+        if !self.store.fact_version_exists(version)? {
+            return Ok(None);
+        }
+        let Some(event) = self.store.change_event(version.valid_from)? else {
+            return Ok(None);
+        };
+        let introduced = event.changed_facts.iter().any(|changed| {
+            changed.fact == version.fact
+                && matches!(
+                    changed.kind,
+                    FactChangeKind::Added | FactChangeKind::Updated
+                )
+        });
+        if !introduced {
+            return Ok(None);
+        }
+        Ok(Some(TemporalRecord::FactVersionIntroduction {
+            schema_version: TEMPORAL_EXPORT_SCHEMA_VERSION,
+            query_mode: TemporalQueryMode::HistoricalConclusion,
+            version,
+            event,
+        }))
+    }
+
+    /// Resolve the accepted transition that closed one exact fact version by
+    /// the query's pinned generation. This is direct transition membership,
+    /// not a claim that the underlying issue was semantically resolved.
+    ///
+    /// # Errors
+    /// Returns a store error if the pinned/closure generation or retained
+    /// history cannot be resolved.
+    pub fn fact_version_retirement(
+        &self,
+        version: FactVersionRef,
+    ) -> Result<Option<TemporalRecord>, QueryError> {
+        let selected_sequence = self.store.generation_sequence(self.generation)?;
+        let Some(validity) = self.store.fact_version_validity(version)? else {
+            return Ok(None);
+        };
+        let Some(closed_at) = validity.valid_until else {
+            return Ok(None);
+        };
+        if self.store.generation_sequence(closed_at)? > selected_sequence {
+            return Ok(None);
+        }
+        let Some(event) = self.store.change_event(closed_at)? else {
+            return Ok(None);
+        };
+        let retired = event.changed_facts.iter().any(|changed| {
+            changed.fact == version.fact
+                && matches!(
+                    changed.kind,
+                    FactChangeKind::Updated | FactChangeKind::Removed
+                )
+        });
+        if !retired {
+            return Ok(None);
+        }
+        Ok(Some(TemporalRecord::FactVersionRetirement {
+            schema_version: TEMPORAL_EXPORT_SCHEMA_VERSION,
+            query_mode: TemporalQueryMode::HistoricalConclusion,
+            version,
+            event,
+        }))
     }
 
     /// Return a bounded page of accepted changes that directly affected one

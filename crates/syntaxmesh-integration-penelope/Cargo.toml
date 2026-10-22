@@ -9,6 +9,7 @@ description = "Penelope-backed durable workflow adapters for SyntaxMesh"
 [features]
 benchmark-instrumentation = []
 analytics-duckdb = ["dep:syntaxmesh-analytics-duckdb"]
+inference-sqlite = ["dep:syntaxmesh-inference", "dep:syntaxmesh-inference-sqlite"]
 
 [dependencies]
 bincode.workspace = true
@@ -19,6 +20,8 @@ syntaxmesh-analytics-parquet.workspace = true
 syntaxmesh-analytics.workspace = true
 syntaxmesh-analytics-duckdb = { workspace = true, optional = true }
 syntaxmesh-core.workspace = true
+syntaxmesh-inference = { workspace = true, optional = true }
+syntaxmesh-inference-sqlite = { workspace = true, optional = true }
 syntaxmesh-extension-sdk.workspace = true
 syntaxmesh-semantic.workspace = true
 syntaxmesh-store.workspace = true
@@ -28,6 +31,7 @@ syntaxmesh-workflow.workspace = true
 blake3.workspace = true
 tempfile.workspace = true
 syntaxmesh-store-turso.workspace = true
+syntaxmesh-query = { workspace = true, features = ["inference"] }
 
 [lints]
 workspace = true

@@ -152,6 +152,39 @@ Add `--mcp --context-tokenizer cl100k_base` to serve Streamable HTTP MCP at
 `http://127.0.0.1:7331/mcp` on the same listener and Engine. The SDK manages
 sessions; requests share the HTTP boundary checks and have a 64 KiB body limit.
 See [ADR-0214](docs/adr/0214-daemon-streamable-http-mcp.md).
+Retained inference reads can be enabled separately in a feature-enabled daemon:
+
+```sh
+cargo build --locked -p syntaxmesh-daemon --features inference-sqlite
+target/debug/syntaxmeshd /path/to/source /path/to/state/graph.db 127.0.0.1:7331 \
+  --inference-read-config /path/to/state/inference-reads.json
+```
+
+The strict version-1 JSON config installs named, read-only bindings for both
+HTTP and optional MCP routes. Example:
+
+```json
+{
+  "schema_version": 1,
+  "limits": {"claims": 100, "payload_bytes": 1048576, "premises": 10000, "tree_pages": 10000},
+  "bindings": [
+    {"id": "rules", "database": "inference.sqlite", "origin_file": "origin.json"}
+  ]
+}
+```
+
+Relative paths are resolved from the config file's directory. `origin_file` is
+the complete receipt emitted by `inference-setup` or `inference-setup-turso`.
+The downstream database must already exist, be explicitly migrated and remain
+outside both the source root and canonical graph database. Config and receipt
+files are bounded to 1 MiB and 16 KiB respectively. The daemon validates and
+installs bindings before opening/reconciling the canonical store; it never
+migrates, recovers, or writes the downstream database. Migration, setup,
+synchronization and recovery remain explicit CLI operations. Without the
+`inference-sqlite` build feature the option is rejected; without the option,
+retained inference routes remain disabled. MCP still requires `--mcp
+--context-tokenizer cl100k_base` (or `o200k_base`). See
+[ADR-0357](docs/adr/0357-daemon-retained-inference-read-configuration.md).
 Readiness is reported only after native registration and initial reconciliation.
 The daemon then atomically publishes a canonical-store endpoint record under its
 writer lease. Clients can discover it with `OwnerEndpoint::discover`; attached
@@ -691,8 +724,14 @@ enable partial ingestion. Indexing explicitly opts in with
 `index-turso`). Partial runs report observed files and processing counts; failed
 files retain diagnostics, not stale successful facts. Unchanged failed files are
 retried without publishing a new generation when facts are unchanged. Embedded
-callers select `SourceSyntaxPolicy::RecordFailures`. Strict remains the default;
-daemon project configuration has no partial-ingestion option yet.
+callers select `SourceSyntaxPolicy::RecordFailures`. The daemon supports the same
+startup flag, `syntaxmeshd <root> <database> <address> --record-syntax-failures`.
+Strict remains the default; this flag is not hot-reloaded project configuration.
+
+Daemon MCP can also opt into `--source-content-context` and
+`--lexical-first-context` alongside `--mcp --context-tokenizer cl100k_base`.
+These affect indexed MCP discovery only; HTTP context and explicit-seed behavior
+remain unchanged. Both policies are optional, not retrieval defaults.
 See [ADR-0326](docs/adr/0326-generation-scoped-source-processing-coverage.md).
 
 Analyze directed cycle components in current or retained facts:
@@ -877,3 +916,52 @@ For cold backup, store checks, migration precautions, and rebuild after local
 store corruption, see the [v0 operations runbook](docs/OPERATIONS.md). The
 runbook calls out current recovery limits; NDJSON export is not a database
 backup or restore format.
+
+## Opt-in inference operations
+
+Build with `cargo build --locked -p syntaxmesh-cli --features inference-sqlite`.
+The available initial operations are:
+
+```bash
+syntaxmesh inference-config-check /path/to/configuration.json
+syntaxmesh inference-migrate /path/to/state/inference.sqlite
+syntaxmesh inference-recover /path/to/state/graph.snapshot
+syntaxmesh inference-recover-turso /path/to/state/graph.db
+syntaxmesh inference-setup /path/to/state/graph.snapshot /path/to/state/inference.sqlite "$baseline_generation" /path/to/configuration.json > /path/to/state/origin.json
+syntaxmesh inference-sync /path/to/state/graph.snapshot /path/to/state/inference.sqlite "$successor_generation" /path/to/configuration.json /path/to/state/origin.json
+syntaxmesh inference-checkpoint /path/to/state/inference.sqlite "$baseline_generation" /path/to/state/origin.json
+syntaxmesh inference-claims-page /path/to/state/inference.sqlite "$baseline_generation" /path/to/state/origin.json 100 1048576 10000 10000
+```
+
+Migration is explicit and respects writer ownership. Recovery runs existing
+journaled inference requests and reports baseline, setup and stream counts; it
+does not need the original configuration. Configuration preflight is bounded to
+1 MiB and does not access storage. Set `baseline_generation` and
+`successor_generation` to accepted canonical generation IDs. Setup returns the
+complete origin receipt; retain it for later commands. Use `inference-setup-turso`
+and `inference-sync-turso` for a Turso canonical store. Synchronization accepts one
+immediate successor, not an arbitrary jump; recover pending work explicitly.
+
+Configuration version 1 selects unregistered rule evaluation and remains
+backward-compatible. Version 2 selects ontology-registered inference and adds
+`ontology_definitions`, `registry_entries`, `registry_bytes`, and `bindings`.
+Each definition declares its schema version, namespace/version, concepts,
+instance-membership relation, and relation signatures (`subject_domain` and
+`object_range`). Rules must bind to those exact namespace/version definitions.
+The same setup/sync commands dispatch to registered Engine workflows, and
+Penelope retains the definitions and bounds for recovery. Preflight validates
+and fingerprints this binding without opening storage; fact-level schema
+validation still occurs against the selected canonical generation.
+
+Checkpoint and page reads only require downstream storage and the origin receipt;
+they never open canonical history. Page budgets independently limit claims, bytes,
+premises and tree pages. Save the returned `next` object as `cursor.json` and pass
+that file as the final argument for a continuation at the same generation. A
+`null` continuation ends pagination. Origin/cursor files are bounded to 16 KiB;
+pages reject unknown selections or corrupt selected data rather than replaying history.
+An unretained checkpoint is reported as `null`. Rules require an external output
+relation and explicit ontology/configuration identity; preflight is not rule
+evaluation. Keep state outside the indexed source tree. Prepared parent setup
+recovery is tested through the CLI for File/Turso; broader interruption cases,
+HTTP/MCP delivery and full-workspace CI for this CLI slice remain open. These
+commands are opt-in, not a completed v0–v5 release.

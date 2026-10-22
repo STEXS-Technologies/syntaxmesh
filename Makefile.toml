@@ -52,28 +52,40 @@ command = "cargo"
 args = ["fmt", "--manifest-path", "crates/fuzz/Cargo.toml", "--check"]
 
 [tasks.check]
-description = "Check all targets and features"
+description = "Check workspace targets with default features (keeps optional DuckDB out of routine builds)"
 workspace = false
 command = "cargo"
-args = ["check", "--workspace", "--all-targets", "--all-features", "--locked", "${@}"]
+args = ["check", "--workspace", "--exclude", "syntaxmesh-analytics-duckdb", "--all-targets", "--locked", "${@}"]
 
 [tasks.build]
-description = "Build the SyntaxMesh workspace"
+description = "Build all default-feature workspace crates without the opt-in DuckDB adapter"
 workspace = false
 command = "cargo"
-args = ["build", "--workspace", "--all-features", "--locked", "${@}"]
+args = ["build", "--workspace", "--exclude", "syntaxmesh-analytics-duckdb", "--locked", "${@}"]
+
+[tasks.build-workspace]
+description = "Build workspace crates with default features, excluding the opt-in DuckDB analytics adapter"
+workspace = false
+command = "cargo"
+args = ["build", "--workspace", "--exclude", "syntaxmesh-analytics-duckdb", "--locked", "${@}"]
+
+[tasks.build-analytics-duckdb]
+description = "Build only the opt-in DuckDB analytics adapter"
+workspace = false
+command = "cargo"
+args = ["build", "-p", "syntaxmesh-analytics-duckdb", "--locked", "${@}"]
 
 [tasks.check-store-instrumentation]
 description = "Check store instrumentation with adapter/query instrumentation disabled"
 workspace = false
 command = "cargo"
-args = ["check", "--workspace", "--all-targets", "--locked", "--features", "syntaxmesh-store/benchmark-instrumentation"]
+args = ["check", "--workspace", "--exclude", "syntaxmesh-analytics-duckdb", "--all-targets", "--locked", "--features", "syntaxmesh-store/benchmark-instrumentation"]
 
 [tasks.check-query-instrumentation]
 description = "Check query instrumentation with adapter instrumentation disabled"
 workspace = false
 command = "cargo"
-args = ["check", "--workspace", "--all-targets", "--locked", "--features", "syntaxmesh-query/benchmark-instrumentation"]
+args = ["check", "--workspace", "--exclude", "syntaxmesh-analytics-duckdb", "--all-targets", "--locked", "--features", "syntaxmesh-query/benchmark-instrumentation"]
 
 [tasks.check-mixed-instrumentation]
 description = "Check downstream-style instrumentation feature unification"
@@ -81,10 +93,16 @@ workspace = false
 dependencies = ["check-store-instrumentation", "check-query-instrumentation"]
 
 [tasks.clippy]
-description = "Run the Shardline-derived strict Clippy policy"
+description = "Run strict Clippy on default-feature workspace targets (DuckDB validation is opt-in)"
 workspace = false
 command = "cargo"
-args = ["clippy", "--workspace", "--all-targets", "--all-features", "--locked", "--", "-D", "warnings", "${@}"]
+args = ["clippy", "--workspace", "--exclude", "syntaxmesh-analytics-duckdb", "--all-targets", "--locked", "--", "-D", "warnings", "${@}"]
+
+[tasks.check-analytics-duckdb]
+description = "Explicitly check the opt-in DuckDB adapter and its Penelope integration"
+workspace = false
+command = "cargo"
+args = ["check", "-p", "syntaxmesh-analytics-duckdb", "-p", "syntaxmesh-integration-penelope", "--features", "syntaxmesh-integration-penelope/analytics-duckdb", "--locked", "${@}"]
 
 [tasks.audit]
 description = "Audit locked dependencies for known security advisories"
@@ -130,17 +148,23 @@ workspace = false
 command = "cargo"
 args = ["run", "--quiet", "-p", "syntaxmesh-xtask", "--", "turso-migrations"]
 
-[tasks.test]
-description = "Run workspace tests without external services"
+[tasks.inference-migrations]
+description = "Verify downstream inference SQL migrations match their ordered registry"
 workspace = false
 command = "cargo"
-args = ["test", "--workspace", "--all-features", "--locked", "${@}"]
+args = ["run", "--quiet", "-p", "syntaxmesh-xtask", "--", "inference-migrations"]
+
+[tasks.test]
+description = "Run default-feature workspace tests without external services (DuckDB validation is opt-in)"
+workspace = false
+command = "cargo"
+args = ["test", "--workspace", "--exclude", "syntaxmesh-analytics-duckdb", "--locked", "${@}"]
 
 [tasks.docs]
-description = "Build public API documentation with broken links rejected"
+description = "Build default-feature workspace API docs (DuckDB validation is opt-in)"
 workspace = false
 command = "cargo"
-args = ["doc", "--workspace", "--no-deps", "--all-features", "--locked", "${@}"]
+args = ["doc", "--workspace", "--exclude", "syntaxmesh-analytics-duckdb", "--no-deps", "--locked", "${@}"]
 env = { RUSTDOCFLAGS = "-D rustdoc::broken_intra_doc_links" }
 
 [tasks.benchmark-temporal]
@@ -190,14 +214,13 @@ args = ["run", "--quiet", "-p", "syntaxmesh-xtask", "--", "fuzz-source-extractor
 [tasks.ci]
 description = "Run the v0 contributor checks"
 workspace = false
-dependencies = ["format-check", "architecture", "extension-fixture", "sqlite-migrations", "turso-migrations", "check-mixed-instrumentation", "check", "clippy", "audit", "deny", "test", "docs"]
+dependencies = ["format-check", "architecture", "extension-fixture", "sqlite-migrations", "turso-migrations", "inference-migrations", "check-mixed-instrumentation", "check", "clippy", "audit", "deny", "test", "docs"]
 
 [tasks.test-overflow]
-description = "Run workspace tests with integer overflow checks enabled"
+description = "Run default-feature workspace tests (the Cargo test profile enables overflow checks)"
 workspace = false
 command = "cargo"
-args = ["test", "--workspace", "--all-features", "--locked", "${@}"]
-env = { RUSTFLAGS = "-C overflow-checks=on" }
+args = ["test", "--workspace", "--exclude", "syntaxmesh-analytics-duckdb", "--locked", "${@}"]
 
 [tasks.ci-overflow]
 description = "Run standard CI plus the overflow-checked test lane"

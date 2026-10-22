@@ -29,6 +29,13 @@ pub(super) fn run(options: Options) -> Result<(), Box<dyn std::error::Error>> {
     if database.starts_with(&root) {
         return Err("daemon database must be outside the source root".into());
     }
+    let (repository, worktree) = repository_scope(&root);
+    #[cfg(feature = "inference-sqlite")]
+    let inference_bindings = options
+        .inference_read_config
+        .as_deref()
+        .map(|path| crate::inference_config::load(path, &root, &database, repository, worktree))
+        .transpose()?;
     let configuration = ProjectConfig::load(&root)?;
     let listener = std::net::TcpListener::bind(options.address)?;
     listener.set_nonblocking(true)?;
@@ -41,7 +48,9 @@ pub(super) fn run(options: Options) -> Result<(), Box<dyn std::error::Error>> {
         &configuration,
         options.verify,
     )?;
-    let mut engine = setup.engine;
+    let mut engine = setup
+        .engine
+        .with_source_syntax_policy(options.syntax_policy);
     reconcile_structural_sources(
         &mut engine,
         &root,
@@ -50,11 +59,16 @@ pub(super) fn run(options: Options) -> Result<(), Box<dyn std::error::Error>> {
         &setup.resolver_fingerprint,
     )?;
     let shared = Arc::new(Mutex::new(engine));
-    let (repository, worktree) = repository_scope(&root);
     let host = SyntaxMeshHttp::from_shared_engine(Arc::clone(&shared), repository, worktree)?
         .with_owner_instance(endpoint.instance())?;
+    #[cfg(feature = "inference-sqlite")]
+    let host = if let Some(bindings) = inference_bindings.as_ref() {
+        host.with_inference(bindings.clone())?
+    } else {
+        host
+    };
     let mcp = if options.mcp {
-        Some(SyntaxMeshMcp::from_shared_engine(
+        let server = SyntaxMeshMcp::from_shared_engine(
             Arc::clone(&shared),
             repository,
             worktree,
@@ -63,7 +77,25 @@ pub(super) fn run(options: Options) -> Result<(), Box<dyn std::error::Error>> {
                 .tokenizer
                 .as_deref()
                 .ok_or("MCP tokenizer missing")?,
-        )?)
+        )?;
+        #[cfg(feature = "inference-sqlite")]
+        let server = if let Some(bindings) = inference_bindings.as_ref() {
+            server.with_inference(bindings.clone())?
+        } else {
+            server
+        };
+        let server = if options.source_content_context {
+            server.with_source_content_context()
+        } else {
+            server
+        };
+        Some(if options.lexical_first_context {
+            server.with_indexed_context_discovery_preference(
+                syntaxmesh_query::DiscoveryPackingPreference::LexicalFirst,
+            )
+        } else {
+            server
+        })
     } else {
         None
     };

@@ -1,0 +1,25 @@
+[package]
+name = "syntaxmesh-inference-sqlite"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Separate transactional SQLite materialization of derived SyntaxMesh claims"
+
+[dependencies]
+bincode.workspace = true
+blake3.workspace = true
+hex.workspace = true
+rusqlite = { version = "0.40.2", default-features = false, features = ["bundled"] }
+serde.workspace = true
+syntaxmesh-core.workspace = true
+syntaxmesh-inference.workspace = true
+syntaxmesh-query = { workspace = true, features = ["inference"] }
+syntaxmesh-store.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true

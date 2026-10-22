@@ -48,6 +48,18 @@ fn start_with_policy_duration(
     verify: bool,
     duration_ms: Option<&str>,
 ) -> Result<(Process, String), Box<dyn Error>> {
+    start_with_extra_options(root, database, polling, mcp, verify, duration_ms, &[])
+}
+
+fn start_with_extra_options(
+    root: &Path,
+    database: &Path,
+    polling: bool,
+    mcp: bool,
+    verify: bool,
+    duration_ms: Option<&str>,
+    extra: &[&str],
+) -> Result<(Process, String), Box<dyn Error>> {
     let mut command = Command::new(env!("CARGO_BIN_EXE_syntaxmeshd"));
     command
         .arg(root)
@@ -56,6 +68,7 @@ fn start_with_policy_duration(
         .args(["--reconcile-ms", "100"])
         .stdout(Stdio::piped())
         .stderr(Stdio::inherit());
+    command.args(extra);
     if let Some(duration) = duration_ms {
         command.args(["--watch-duration-ms", duration]);
     }
@@ -96,6 +109,11 @@ mod mcp;
 mod config_reload;
 #[path = "lifecycle/discovery.rs"]
 mod discovery;
+#[cfg(feature = "inference-sqlite")]
+#[path = "lifecycle/inference.rs"]
+mod inference;
+#[path = "lifecycle/partial_processing.rs"]
+mod partial_processing;
 
 fn search(
     client: &Client,

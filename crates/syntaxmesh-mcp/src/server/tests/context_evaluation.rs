@@ -1,6 +1,44 @@
 //! Opt-in corpus evaluations, reusing the shared MCP fixtures and evidence paths.
 use super::*;
 
+fn approved_benchmark_origin(origin: &str) -> bool {
+    [
+        "git@github.com:STEXS-Technologies/shardline.git",
+        "git@workstation:STEXS-Technologies/shardline.git",
+        "https://github.com/STEXS-Technologies/shardline.git",
+        "https://github.com/STEXS-Technologies/shardline",
+        "git@github.com:STEXS-Technologies/penelope.git",
+        "https://github.com/STEXS-Technologies/penelope.git",
+        "git@github.com:STEXS-Technologies/statechronicle.git",
+        "https://github.com/STEXS-Technologies/statechronicle.git",
+    ]
+    .contains(&origin.trim())
+}
+
+#[test]
+fn benchmark_origin_requires_exact_approved_repository() {
+    for origin in [
+        "git@github.com:STEXS-Technologies/shardline.git",
+        "git@workstation:STEXS-Technologies/shardline.git",
+        "git@github.com:STEXS-Technologies/penelope.git",
+        "https://github.com/STEXS-Technologies/statechronicle.git",
+        "https://github.com/STEXS-Technologies/shardline.git\n",
+        "https://github.com/STEXS-Technologies/shardline",
+    ] {
+        assert!(approved_benchmark_origin(origin));
+    }
+    for origin in [
+        "",
+        "https://github.com/external/shardline.git",
+        "https://example.org/STEXS-Technologies/shardline.git",
+        "https://github.com/STEXS-Technologies/shardline.git/extra",
+        "git@github.com:external/STEXS-Technologies/shardline.git",
+        "https://github.com/other/penelope.git",
+    ] {
+        assert!(!approved_benchmark_origin(origin));
+    }
+}
+
 fn target_name_matches(name: &str, target: &str, kind: &str) -> bool {
     if kind == "Function" {
         name == target
@@ -25,6 +63,16 @@ fn function_target_identity_excludes_prefixed_test_names() {
         "Benchmark evidence and limitations",
         "Benchmark evidence",
         "Section"
+    ));
+    assert!(target_name_matches(
+        "Executor::execute",
+        "Executor::execute",
+        "Function"
+    ));
+    assert!(target_name_matches(
+        "| Infrastructure independence | No transport/persistence inside domain |",
+        "Infrastructure independence",
+        "DocumentChunk"
     ));
 }
 
@@ -166,8 +214,22 @@ fn context_sibling_source_retrieval_evaluation() -> Result<(), Box<dyn Error>> {
     };
     let source_root = std::env::var_os("SYNTAXMESH_CONTEXT_EVAL_ROOT")
         .map(PathBuf::from)
-        .ok_or_else(|| std::io::Error::other("set SYNTAXMESH_CONTEXT_EVAL_ROOT to Shardline"))?;
+        .ok_or_else(|| {
+            std::io::Error::other(
+                "set SYNTAXMESH_CONTEXT_EVAL_ROOT to an approved STEXS Technologies repository",
+            )
+        })?;
     let source_root = fs::canonicalize(source_root)?;
+    let origin = std::process::Command::new("git")
+        .args(["remote", "get-url", "origin"])
+        .current_dir(&source_root)
+        .output()?;
+    let origin_url = std::str::from_utf8(&origin.stdout)?;
+    if !origin.status.success() || !approved_benchmark_origin(origin_url) {
+        return Err(
+            "external context evaluation requires an approved STEXS Technologies origin".into(),
+        );
+    }
     let corpus = source_root
         .file_name()
         .and_then(|name| name.to_str())
@@ -225,9 +287,55 @@ fn context_sibling_source_retrieval_evaluation() -> Result<(), Box<dyn Error>> {
                 "DocumentChunk",
             ),
         ],
+        "penelope" => vec![
+            (
+                "penelope_task_schema",
+                "verify checkpoint payload bytes against the pinned schema",
+                "BlobRef::verify",
+                "crates/penelope-core/src/task/contracts.rs",
+                "Function",
+            ),
+            (
+                "penelope_definition_identity",
+                "bind recovery permissions and resource limits into task identity",
+                "TaskDefinition::fingerprint",
+                "crates/penelope-core/src/task/contracts.rs",
+                "Function",
+            ),
+            (
+                "penelope_recovery_docs",
+                "how durable checkpoints, execution, fencing, and recovery coordinate",
+                "Recoverable task execution",
+                "README.md",
+                "Section",
+            ),
+        ],
+        "statechronicle" => vec![
+            (
+                "statechronicle_transition",
+                "how does the portable execute transition enforce expected_version and call the StateProfile reducer",
+                "execute",
+                "crates/statechronicle-portable/src/transition.rs",
+                "Function",
+            ),
+            (
+                "statechronicle_bundle_verification",
+                "verify a proof bundle against its signed commit and authority",
+                "verify_bundle",
+                "crates/statechronicle-proof/src/verify.rs",
+                "Function",
+            ),
+            (
+                "statechronicle_boundaries_docs",
+                "which architecture boundaries keep persistence and transport outside the domain",
+                "Infrastructure independence",
+                "docs/ARCHITECTURE.md",
+                "DocumentChunk",
+            ),
+        ],
         _ => {
             return Err(std::io::Error::other(format!(
-                "unsupported evaluation corpus {corpus}; expected Shardline"
+                "unsupported evaluation corpus {corpus}; expected Shardline, Penelope, or StateChronicle"
             ))
             .into());
         }
@@ -268,16 +376,16 @@ fn context_sibling_source_retrieval_evaluation() -> Result<(), Box<dyn Error>> {
             .into());
         }
     };
+    // The canonical corpus/index/all-fact probe is read-only and can run
+    // alongside indexed-host evaluation to compare its seed set against the
+    // independent all-fact baseline at the same pinned generation. Keep every
+    // policy-changing or alternative seed probe mutually exclusive.
     if indexed_host_probe
         && [
-            "SYNTAXMESH_CONTEXT_CORPUS_PROBE",
-            "SYNTAXMESH_CONTEXT_IDENTIFIER_INDEX_PROBE",
-            "SYNTAXMESH_CONTEXT_GRAPH_SEED_PROBE",
             "SYNTAXMESH_CONTEXT_FAMILY_SEED_PROBE",
             "SYNTAXMESH_CONTEXT_PATH_IDENTIFIER_INDEX_PROBE",
             "SYNTAXMESH_CONTEXT_MIXED_SEED_PROBE",
             "SYNTAXMESH_CONTEXT_DEFINITION_SEED_PROBE",
-            "SYNTAXMESH_CONTEXT_ALL_FACT_CHANNEL_SEED_PROBE",
             "SYNTAXMESH_CONTEXT_TARGET_SEED_PROBE",
         ]
         .iter()
@@ -452,34 +560,40 @@ fn context_sibling_source_retrieval_evaluation() -> Result<(), Box<dyn Error>> {
     } else {
         None
     };
+    // Resolve each evaluation target from its matching canonical names. Do not
+    // enumerate the complete generation through an empty-string search: larger
+    // repositories make that both expensive and dependent on backend result
+    // limits. The MCP-facing search tool has a smaller presentation cap, so
+    // use the pinned query service directly and retain exact kind/path checks.
+    let target_cases = cases.clone();
+    let target_ids = runtime.block_on(server.with_query(move |service| {
+        let mut targets = std::collections::BTreeMap::new();
+        for (case_id, _, target_name, target_path, target_kind) in &target_cases {
+            let expected_file = syntaxmesh_core::FileId::derive(&[target_path.as_bytes()]);
+            let candidates = service
+                .search(target_name, usize::try_from(i64::MAX).unwrap_or(usize::MAX))
+                .map_err(|error| error.to_string())?;
+            let node = candidates.iter().find(|node| {
+                target_name_matches(&node.name, target_name, target_kind)
+                    && format!("{:?}", node.kind) == *target_kind
+                    && node
+                        .source
+                        .as_ref()
+                        .is_some_and(|source| source.file_id == expected_file)
+            });
+            if let Some(node) = node {
+                targets.insert(*case_id, node.id.0.to_hex());
+            }
+        }
+        Ok(targets)
+    }))?;
     let mut missed_required = Vec::new();
     for (case_id, query, target_name, target_path, target_kind) in cases {
-        let expected_file =
-            serde_json::to_value(syntaxmesh_core::FileId::derive(&[target_path.as_bytes()]))?;
-        let search = runtime.block_on(server.search(Parameters(SearchArgs {
-            text: target_name.to_owned(),
-            limit: Some(100),
-        })))?;
-        let search_value = content_json(&search)?;
-        let target_id = search_value
-            .get("nodes")
-            .and_then(Value::as_array)
-            .and_then(|nodes| {
-                nodes.iter().find(|node| {
-                    node.get("name")
-                        .and_then(Value::as_str)
-                        .is_some_and(|name| target_name_matches(name, target_name, target_kind))
-                        && node.get("kind").and_then(Value::as_str) == Some(target_kind)
-                        && node.pointer("/source/file_id") == Some(&expected_file)
-                })
-            })
-            .and_then(|node| node.get("id"))
-            .and_then(Value::as_str)
-            .ok_or_else(|| {
-                std::io::Error::other(format!(
-                    "retrieval evaluation target {target_name:?} ({target_kind}) was not indexed in {corpus}: {search_value}"
-                ))
-            })?;
+        let target_id = target_ids.get(case_id).ok_or_else(|| {
+            std::io::Error::other(format!(
+                "retrieval evaluation target {target_name:?} ({target_kind}) in {target_path} was not indexed in {corpus}"
+            ))
+        })?;
         let target_record =
             serde_json::to_value(SyntaxMeshMcp::<RustExtractor>::parse_node_id(target_id)?)?;
 
@@ -851,15 +965,19 @@ fn context_sibling_source_retrieval_evaluation() -> Result<(), Box<dyn Error>> {
                     .ok_or("successful indexed host request did not retain its index")?;
                 let metrics = built_index.build_metrics();
                 eprintln!(
-                    "context_index_build case={case_id} pages={} scans={} nodes={} postings={} payload_bytes={} total_us={} page_read_us={} processing_us={}",
+                    "context_index_build case={case_id} pages={} scans={} nodes={} postings={} payload_bytes={} source_spans={} source_files={} source_bytes={} total_us={} page_read_us={} processing_us={} source_us={}",
                     metrics.node_pages,
                     metrics.node_scans,
                     metrics.nodes,
                     metrics.postings,
                     metrics.payload_bytes,
+                    metrics.source_spans,
+                    metrics.source_files,
+                    metrics.source_bytes,
                     metrics.elapsed.as_micros(),
                     metrics.page_read_elapsed.as_micros(),
                     metrics.processing_elapsed.as_micros(),
+                    metrics.source_elapsed.as_micros(),
                 );
             }
             if indexed_host_probe {
@@ -880,6 +998,11 @@ fn context_sibling_source_retrieval_evaluation() -> Result<(), Box<dyn Error>> {
                         let seeds = service.lexical_seed_plan(&inspected_index,
                             &syntaxmesh_query::LexicalPlanRequest { query, posting_budget: 8_000_000 })
                             .map_err(|error| error.to_string())?;
+                        let ranked = service.identifier_candidates(&inspected_index, query, 8_000_000, 256)
+                            .map_err(|error| error.to_string())?;
+                        let files = service.files().map_err(|error| error.to_string())?
+                            .into_iter().map(|file| (file.file_id, file.normalized_path))
+                            .collect::<std::collections::BTreeMap<_, _>>();
                         let selection = service.ranked_seeded_context_selection(
                             &syntaxmesh_api_model::ContextRequest {
                                 query: query.to_owned(), seed_nodes: seeds.clone(), token_budget: 2048,
@@ -892,10 +1015,24 @@ fn context_sibling_source_retrieval_evaluation() -> Result<(), Box<dyn Error>> {
                             &inspected_index, &syntaxmesh_query::LexicalPlanRequest { query, posting_budget: 8_000_000 },
                             &syntaxmesh_query::SourceRolePackingRequest { selected: &selected, original: &original, preference: role_preference }, discovery_preference)
                             .map_err(|error| error.to_string())?;
+                        let seed_details = seeds.iter().map(|id| {
+                            let node = service.node(*id).map_err(|error| error.to_string())?
+                                .ok_or_else(|| "lexical seed disappeared from pinned generation".to_owned())?;
+                            let path = node.source.as_ref()
+                                .and_then(|source| files.get(&source.file_id));
+                            let name = node.name.chars().take(120).collect::<String>();
+                            Ok(serde_json::json!({"name": name, "kind": format!("{:?}", node.kind),
+                                "path": path, "selected": selected.contains(id)}))
+                        }).collect::<Result<Vec<_>, String>>()?;
+                        let candidate_rank = ranked.iter().position(|candidate| candidate.node.id == expected_id)
+                            .map(|rank| rank + 1);
+                        let candidate_score = ranked.iter().find(|candidate| candidate.node.id == expected_id)
+                            .map(|candidate| candidate.score);
                         Ok(serde_json::json!({"seed_position": seeds.iter().position(|id| *id == expected_id),
                             "seed_count": seeds.len(), "selected": selected.contains(&expected_id),
                             "packing_position": packing.iter().position(|id| *id == expected_id),
-                            "selected_count": selected.len()}))
+                            "selected_count": selected.len(), "identifier_candidate_rank": candidate_rank,
+                            "identifier_candidate_score": candidate_score, "seeds": seed_details}))
                     }))?;
                     eprintln!("context_target_candidates case={case_id} diagnostic={diagnostic}");
                 }

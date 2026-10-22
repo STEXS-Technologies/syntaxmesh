@@ -2,6 +2,7 @@
 
 use super::tree_store::historical_incident_edge_page;
 use super::*;
+use syntaxmesh_core::FactVersionRef;
 
 fn read_temporal_evidence<T: serde::de::DeserializeOwned>(
     connection: &rusqlite::Connection,
@@ -291,6 +292,54 @@ impl GraphStore for SqliteGraphStore {
 
     fn fact_history(&self, fact: FactRef) -> Result<Vec<FactHistoryVersion>, StoreError> {
         read_fact_history(&self.connection, fact)
+    }
+
+    fn fact_version_exists(&self, version: FactVersionRef) -> Result<bool, StoreError> {
+        let (kind, id) = syntaxmesh_store::fact_storage_key(version.fact);
+        self.connection
+            .query_row(
+                "SELECT EXISTS (SELECT 1 FROM syntaxmesh_fact_versions WHERE fact_kind = ?1 AND fact_id = ?2 AND valid_from_sequence = (SELECT sequence FROM syntaxmesh_generation_history WHERE generation = ?3))",
+                rusqlite::params![kind, id.as_slice(), version.valid_from.0.0.as_slice()],
+                |row| row.get(0),
+            )
+            .map_err(sql_error)
+    }
+
+    fn fact_version_validity(
+        &self,
+        version: FactVersionRef,
+    ) -> Result<Option<syntaxmesh_store::FactVersionValidity>, StoreError> {
+        let (kind, id) = syntaxmesh_store::fact_storage_key(version.fact);
+        let row = self.connection.query_row(
+            "SELECT versions.valid_until_sequence, end_entry.payload FROM syntaxmesh_fact_versions AS versions JOIN syntaxmesh_generation_history AS start_entry ON start_entry.generation = ?3 LEFT JOIN syntaxmesh_generation_history AS end_entry ON end_entry.sequence = versions.valid_until_sequence WHERE versions.fact_kind = ?1 AND versions.fact_id = ?2 AND versions.valid_from_sequence = start_entry.sequence",
+            rusqlite::params![kind, id.as_slice(), version.valid_from.0.0.as_slice()],
+            |row| Ok((row.get::<_, Option<i64>>(0)?, row.get::<_, Option<Vec<u8>>>(1)?)),
+        ).optional().map_err(sql_error)?;
+        let Some((end_sequence, end_payload)) = row else {
+            return Ok(None);
+        };
+        let valid_until = match (end_sequence, end_payload) {
+            (None, None) => None,
+            (Some(_), Some(payload)) => Some(
+                bincode::deserialize::<GenerationHistoryEntry>(&payload)
+                    .map_err(|error| {
+                        StoreError::Integrity(format!(
+                            "decode fact-version end generation: {error}"
+                        ))
+                    })?
+                    .manifest
+                    .generation,
+            ),
+            _ => {
+                return Err(StoreError::Integrity(
+                    "fact-version end sequence and generation payload disagree".into(),
+                ));
+            }
+        };
+        Ok(Some(syntaxmesh_store::FactVersionValidity {
+            valid_from: version.valid_from,
+            valid_until,
+        }))
     }
 
     fn fact_versions_changed_at(

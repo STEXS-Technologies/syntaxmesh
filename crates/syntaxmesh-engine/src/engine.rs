@@ -29,8 +29,8 @@ mod inference;
 mod integrity;
 #[cfg(feature = "inference-sqlite")]
 pub use inference::{
-    ContractHistoryAdvanceReceipt, ContractHistoryAdvanceRequest, ContractResultAsOf,
-    InferenceRecovery,
+    ContractHistoryAdvanceReceipt, ContractHistoryAdvanceRequest, ContractHistoryRetainRequest,
+    ContractResultAsOf, InferenceRecovery,
 };
 mod semantic;
 #[cfg(test)]

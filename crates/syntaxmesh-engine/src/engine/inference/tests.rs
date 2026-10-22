@@ -11,7 +11,6 @@ use syntaxmesh_inference::{
 use syntaxmesh_inference_sqlite::{
     ContractHistoryWatermark, InferenceMaterializer, StreamSyncRequest,
 };
-use syntaxmesh_integration_penelope::ContractHistoryRequest;
 use syntaxmesh_lang_rust::RustExtractor;
 use syntaxmesh_language_sdk::SourceFile;
 use syntaxmesh_query::Query;
@@ -88,14 +87,14 @@ fn contract_history_is_invariant_under_opt_in_statechronicle_verification()
         edge_visits: 100,
         results: 1,
     };
-    let durable_request = ContractHistoryRequest {
+    let durable_request = ContractHistoryRetainRequest {
         generation,
         contracts: &contracts,
         limits: &limits,
         history_scan_budget: 100,
         output_bytes: 16_384,
     };
-    let verified_request = ContractHistoryRequest {
+    let verified_request = ContractHistoryRetainRequest {
         generation,
         ..durable_request
     };
@@ -168,7 +167,7 @@ fn engine_retains_contract_history_through_penelope_and_recovers_it()
         edge_visits: 100,
         results: 1,
     };
-    let request = ContractHistoryRequest {
+    let request = ContractHistoryRetainRequest {
         generation,
         contracts: &contracts,
         limits: &limits,
@@ -262,7 +261,7 @@ fn engine_advances_retained_contracts_over_successors_and_recovers_partial_catch
         SyntaxMeshEngine::new(store, RustExtractor, manifest.repository, manifest.worktree);
     let baseline = engine.retain_contract_history(
         &database,
-        &ContractHistoryRequest {
+        &ContractHistoryRetainRequest {
             generation: first,
             contracts: &contracts,
             limits: &limits,
@@ -401,7 +400,7 @@ fn exercise_contract_catch_up<S: GraphStore + DurableRecordStore>(
         SyntaxMeshEngine::new(store, RustExtractor, manifest.repository, manifest.worktree);
     engine.retain_contract_history(
         database,
-        &ContractHistoryRequest {
+        &ContractHistoryRetainRequest {
             generation: first,
             contracts: &contracts,
             limits: &limits,

@@ -252,6 +252,18 @@ critical rule that stale evidence is not a current compliance conclusion; automa
 evaluation, authored-contract lifecycle, richer drift summaries, and broader
 v0–v5 acceptance remain open.
 
+[ADR-0384](adr/0384-cli-authored-contract-sets.md) adds a versioned
+File/Turso CLI for authoring and retaining complete contract sets through the
+runtime-neutral Engine and Penelope. Exact retries at the same generation are
+idempotent; a different set must replace the baseline at a later generation,
+and earlier results remain historical. Bounded config parsing, strict field
+validation, relation/ID conversion, same-generation conflict rejection,
+later-generation replacement, catch-up from the replacement set, and File/Turso
+history are covered. The CLI returns retained evaluations but does not enforce
+policy or run automatically on publication. Explicit deprecation status,
+publication-time scheduling, richer drift analysis, and the broader v0–v5
+acceptance gates remain open. Full-CI evidence is recorded in the ADR.
+
 After this retrieval and target-discovery change, `cargo make ci` passed in
 184.40 seconds on 2026-10-22. It covered workspace formatting, architecture,
 extension isolation, migration registries, instrumented/default checks, audit

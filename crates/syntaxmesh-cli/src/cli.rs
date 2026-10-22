@@ -15,6 +15,8 @@ use syntaxmesh_store::{DurableRecordStore, FileGraphStore, GraphStore};
 use syntaxmesh_store_turso::TursoGraphStore;
 
 mod attachment;
+#[cfg(feature = "inference-sqlite")]
+mod contract_config;
 mod cycles;
 mod error;
 mod extensions;
@@ -173,6 +175,10 @@ fn print_help() -> Result<(), CliError> {
     #[cfg(feature = "inference-sqlite")]
     write_stdout(
         "  syntaxmesh inference-result-as-of[-turso] <canonical-store> <inference.sqlite> <generation> <contract-id> <contract-version>",
+    )?;
+    #[cfg(feature = "inference-sqlite")]
+    write_stdout(
+        "  syntaxmesh inference-retain-contracts[-turso] <canonical-store> <inference.sqlite> <generation> <contracts.json>",
     )?;
     Ok(())
 }
@@ -531,6 +537,10 @@ fn run(arguments: impl IntoIterator<Item = String>) -> Result<(), CliError> {
         #[cfg(feature = "inference-sqlite")]
         "inference-result-as-of" | "inference-result-as-of-turso" => {
             inference::result_as_of(command.ends_with("-turso"), arguments)
+        }
+        #[cfg(feature = "inference-sqlite")]
+        "inference-retain-contracts" | "inference-retain-contracts-turso" => {
+            inference::retain_contracts(command.ends_with("-turso"), arguments)
         }
         #[cfg(feature = "inference-sqlite")]
         "inference-migrate" | "inference-recover" | "inference-recover-turso" => {

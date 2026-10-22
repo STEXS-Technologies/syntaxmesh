@@ -931,6 +931,7 @@ syntaxmesh inference-setup /path/to/state/graph.snapshot /path/to/state/inferenc
 syntaxmesh inference-sync /path/to/state/graph.snapshot /path/to/state/inference.sqlite "$successor_generation" /path/to/configuration.json /path/to/state/origin.json
 syntaxmesh inference-checkpoint /path/to/state/inference.sqlite "$baseline_generation" /path/to/state/origin.json
 syntaxmesh inference-claims-page /path/to/state/inference.sqlite "$baseline_generation" /path/to/state/origin.json 100 1048576 10000 10000
+syntaxmesh inference-retain-contracts /path/to/state/graph.snapshot /path/to/state/inference.sqlite "$generation" /path/to/contracts.json
 syntaxmesh inference-catch-up /path/to/state/graph.snapshot /path/to/state/inference.sqlite "$through_generation" 100 10000 1048576 100000 1048576
 syntaxmesh inference-result-as-of /path/to/state/graph.snapshot /path/to/state/inference.sqlite "$selected_generation" target-not-in-concept 1
 ```
@@ -944,6 +945,35 @@ complete origin receipt; retain it for later commands. Use `inference-setup-turs
 and `inference-sync-turso` for a Turso canonical store. Synchronization accepts one
 immediate successor, not an arbitrary jump; recover pending work explicitly.
 
+`inference-retain-contracts[-turso]` evaluates and retains a complete
+generation-scoped contract set. Its version-1 JSON file uses hexadecimal node
+IDs, snake-case `origin`/`expectation` values, and a tagged relation object, for
+example:
+
+```json
+{
+  "version": 1,
+  "contracts": [{
+    "id": "ledger-write-requires-authorization",
+    "version": "1",
+    "origin": "declared",
+    "source": "<64-hex-node-id>",
+    "target": "<64-hex-node-id>",
+    "relation": {"kind": "external", "namespace": "finance", "relation": "authorized_by"},
+    "expectation": "required"
+  }],
+  "limits": {"contracts": 100, "input_bytes": 65536, "edge_visits": 100000, "results": 100},
+  "history_scan_budget": 100000,
+  "output_bytes": 1048576
+}
+```
+
+The file contains the whole contract set for that generation. An identical
+same-generation retry is idempotent; a changed set must use a later generation.
+Contracts omitted from a later replacement stop being the catch-up baseline,
+but all earlier evaluations remain in history. This records evidence and
+outcomes; it does not enforce policy or run automatically at graph publication.
+
 `inference-catch-up` advances the latest already-retained contract set over each
 immediate canonical successor through `through_generation`; it does not require
 resending declarations and never silently evaluates unretained generations on a
@@ -952,8 +982,8 @@ history scans per generation, encoded contract input bytes, edge visits, and
 serialized output bytes per generation. A failed run keeps its completed prefix
 and Penelope recovery resumes prepared work. Use `inference-catch-up-turso` for
 a Turso canonical store. Contracts must already have been retained through the
-feature-enabled Engine API; CLI contract authoring and lifecycle management are
-not implemented yet.
+retention command or feature-enabled Engine API. Explicit deprecation metadata
+and automated evaluation scheduling are not implemented yet.
 
 `inference-result-as-of[-turso]` performs one indexed lookup for the latest
 retained result no newer than the selected canonical generation. Output reports

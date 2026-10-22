@@ -8,8 +8,8 @@ mod source_planning;
 
 #[cfg(feature = "inference-sqlite")]
 pub use engine::{
-    ContractHistoryAdvanceReceipt, ContractHistoryAdvanceRequest, ContractResultAsOf,
-    InferenceRecovery,
+    ContractHistoryAdvanceReceipt, ContractHistoryAdvanceRequest, ContractHistoryRetainRequest,
+    ContractResultAsOf, InferenceRecovery,
 };
 
 pub use engine::{

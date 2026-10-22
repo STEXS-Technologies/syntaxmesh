@@ -6,6 +6,8 @@ use syntaxmesh_store::GraphStore;
 
 #[path = "inference_commands/contract_history.rs"]
 mod contract_history;
+#[path = "inference_commands/contracts_authoring.rs"]
+mod contracts_authoring;
 #[path = "inference_commands/pages.rs"]
 mod pages;
 #[path = "inference_commands/recovery.rs"]

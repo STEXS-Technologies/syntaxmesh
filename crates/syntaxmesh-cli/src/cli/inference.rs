@@ -5,6 +5,8 @@ use syntaxmesh_ownership_host::WriterLease;
 
 mod setup;
 pub(super) use setup::setup;
+mod author;
+pub(super) use author::retain_contracts;
 mod as_of;
 pub(super) use as_of::result_as_of;
 mod catch_up;

@@ -45,6 +45,15 @@ pub struct ContractHistoryAdvanceReceipt {
     pub last_watermark: ContractHistoryWatermark,
 }
 
+/// Runtime-neutral input for retaining a complete contract set at one generation.
+pub struct ContractHistoryRetainRequest<'contracts> {
+    pub generation: syntaxmesh_core::GenerationId,
+    pub contracts: &'contracts [syntaxmesh_inference::Contract],
+    pub limits: &'contracts ContractLimits,
+    pub history_scan_budget: usize,
+    pub output_bytes: usize,
+}
+
 /// Latest retained evaluation no newer than a pinned canonical generation.
 ///
 /// `evaluation` can be older than `target_generation`; compare its generation to the target before
@@ -90,9 +99,13 @@ impl<S: GraphStore + DurableRecordStore, E: LanguageExtractor> SyntaxMeshEngine<
     pub fn retain_contract_history(
         &mut self,
         database: impl AsRef<Path>,
-        request: &PenelopeContractHistoryRequest<'_>,
+        request: &ContractHistoryRetainRequest<'_>,
     ) -> Result<ContractHistoryWatermark, EngineError> {
         let manifest = self.indexer.store().manifest(request.generation)?;
+        let request_sequence = self
+            .indexer
+            .store()
+            .generation_sequence(request.generation)?;
         if manifest.repository != self.repository || manifest.worktree != self.worktree {
             return Err(syntaxmesh_workflow::WorkflowError::Store(
                 syntaxmesh_store::StoreError::InvalidDelta(
@@ -101,7 +114,33 @@ impl<S: GraphStore + DurableRecordStore, E: LanguageExtractor> SyntaxMeshEngine<
             )
             .into());
         }
+        if request.contracts.is_empty() {
+            return Err(syntaxmesh_workflow::WorkflowError::Store(
+                syntaxmesh_store::StoreError::InvalidDelta(
+                    "contract history requires a non-empty complete contract set".to_owned(),
+                ),
+            )
+            .into());
+        }
         self.recover_pending_workflows()?;
+        let mut contracts = request.contracts.to_vec();
+        contracts
+            .sort_by(|left, right| (&left.id, &left.version).cmp(&(&right.id, &right.version)));
+        let latest = InferenceMaterializer::open(database.as_ref())
+            .map_err(|error| WorkflowError::Verification(error.to_string()))?
+            .latest_contract_set(self.repository, self.worktree)
+            .map_err(|error| WorkflowError::Verification(error.to_string()))?;
+        if let Some(latest) = latest {
+            if request_sequence < latest.watermark.generation_sequence
+                || (request_sequence == latest.watermark.generation_sequence
+                    && contracts != latest.contracts)
+            {
+                return Err(WorkflowError::Store(StoreError::InvalidDelta(
+                    "contract set must replace the authoring head at a later generation; same-generation changes are ambiguous".to_owned(),
+                ))
+                .into());
+            }
+        }
         Ok(
             PenelopeInferenceMaterializer::new(self.indexer.store_mut()).retain_contract_history(
                 database,

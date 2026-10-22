@@ -5182,6 +5182,7 @@ dependencies = [
  "rusqlite",
  "serde_json",
  "syn 3.0.6",
+ "syntaxmesh-scanner",
  "tempfile",
 ]
 

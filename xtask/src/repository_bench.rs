@@ -166,6 +166,17 @@ pub(super) fn run(workspace: &Path) -> BenchResult<()> {
         .map(PathBuf::from)
         .unwrap_or_else(|| workspace.to_owned());
     let repository = absolute_path(&repository)?;
+    let fixture_scan = syntaxmesh_scanner::scan(&repository, &["rs"])?;
+    if fixture_scan.files.is_empty() {
+        return Err(format!("no Rust inputs found under {}", repository.display()).into());
+    }
+    let fixture_source_bytes = fixture_scan
+        .files
+        .iter()
+        .map(|source| source.file.size_bytes)
+        .try_fold(0_u64, u64::checked_add)
+        .ok_or("repository benchmark source-byte count overflowed")?;
+    let fixture_input_fingerprint = fingerprint_sources(&fixture_scan);
     let selected_backends = selected_backends()?;
     let iterations = env::var("SYNTAXMESH_BENCH_ITERATIONS")
         .unwrap_or_else(|_| "3".into())
@@ -193,11 +204,17 @@ pub(super) fn run(workspace: &Path) -> BenchResult<()> {
     let gnu_time = gnu_time_binary();
     let rustc = command_output("rustc", &["--version"]);
     let metadata = json!({
-        "schema_version": 6,
+        "schema_version": 7,
         "revision": revision,
         "working_tree_dirty": dirty,
         "timestamp_utc": Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Micros, true),
         "repository_root": repository.display().to_string(),
+        "fixture_revision": git_value(&repository, &["rev-parse", "--short=12", "HEAD"]),
+        "fixture_working_tree_dirty": git_value(&repository, &["status", "--porcelain", "--untracked-files=normal"])
+            .is_some_and(|status| !status.is_empty()),
+        "fixture_rust_file_count": fixture_scan.files.len(),
+        "fixture_source_bytes": fixture_source_bytes,
+        "fixture_input_fingerprint_blake3": fixture_input_fingerprint,
         "iterations": iterations,
         "command": ["cargo", "make", "benchmark-repository"],
         "platform": format!("{}-{}", env::consts::OS, env::consts::ARCH),
@@ -364,6 +381,19 @@ fn selected_backends() -> BenchResult<Vec<String>> {
         .filter(|backend| unique.contains(**backend))
         .map(|backend| (*backend).to_owned())
         .collect())
+}
+
+fn fingerprint_sources(report: &syntaxmesh_scanner::ScanReport) -> String {
+    let mut hasher = blake3::Hasher::new();
+    hasher.update(b"syntaxmesh-repository-benchmark-input-v1\0");
+    for source in &report.files {
+        let path = source.file.normalized_path.as_bytes();
+        hasher.update(&u64::try_from(path.len()).unwrap_or(u64::MAX).to_le_bytes());
+        hasher.update(path);
+        hasher.update(&source.file.size_bytes.to_le_bytes());
+        hasher.update(&source.file.content_hash);
+    }
+    hasher.finalize().to_hex().to_string()
 }
 
 fn benchmark_environment(
@@ -838,6 +868,8 @@ fn render_summary(metadata: &Value, samples: &[Value]) -> BenchResult<String> {
         format!("- source: `{source}`"),
         format!("- measured at: `{}`", metadata.get("timestamp_utc").and_then(Value::as_str).unwrap_or("unknown")),
         format!("- fixture: `{}`", metadata.get("repository_root").and_then(Value::as_str).unwrap_or("unknown")),
+        format!("- fixture revision: `{}`; working tree dirty: {}", metadata.get("fixture_revision").and_then(Value::as_str).unwrap_or("unknown"), metadata.get("fixture_working_tree_dirty").and_then(Value::as_bool).unwrap_or(false)),
+        format!("- fixture inputs: {} Rust files, {} bytes; BLAKE3 `{}`", metadata.get("fixture_rust_file_count").and_then(Value::as_u64).unwrap_or_default(), metadata.get("fixture_source_bytes").and_then(Value::as_u64).unwrap_or_default(), metadata.get("fixture_input_fingerprint_blake3").and_then(Value::as_str).unwrap_or("unknown")),
         format!("- host: {} ({})", metadata.get("platform").and_then(Value::as_str).unwrap_or("unknown"), metadata.get("logical_cpus").and_then(Value::as_u64).map_or_else(|| "unknown CPUs".into(), |n| format!("{n} logical CPUs"))),
         format!("- toolchain: `{}`", metadata.get("rustc").and_then(Value::as_str).unwrap_or("unknown")),
         format!("- samples: {} fresh database runs", metadata.get("iterations").and_then(Value::as_u64).unwrap_or_default()),
@@ -1145,7 +1177,7 @@ fn exit_error(status: std::process::ExitStatus, message: &str) -> BenchResult<()
 mod tests {
     use super::{
         IN_MEMORY_STORE_DELTA_STAGES, PENELOPE_STAGES, Patterns, STORE_DELTA_STAGES,
-        parse_publication,
+        fingerprint_sources, parse_publication,
     };
 
     fn diagnostics(store_stages: &[&str]) -> String {
@@ -1189,6 +1221,29 @@ mod tests {
         let old_inner_only_profile = &STORE_DELTA_STAGES[2..8];
         if parse_publication(&diagnostics(old_inner_only_profile), "in-memory", &patterns).is_ok() {
             return Err("parser accepted incomplete nested lineage stages".into());
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn fixture_fingerprint_is_stable_and_tracks_selected_rust_inputs()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let root = tempfile::tempdir()?;
+        let source = root.path().join("src");
+        std::fs::create_dir(&source)?;
+        let file = source.join("lib.rs");
+        std::fs::write(&file, "pub fn first() {}\n")?;
+        let first_scan = syntaxmesh_scanner::scan(root.path(), &["rs"])?;
+        let first = fingerprint_sources(&first_scan);
+        let repeated_scan = syntaxmesh_scanner::scan(root.path(), &["rs"])?;
+        if fingerprint_sources(&repeated_scan) != first || first_scan.files.len() != 1 {
+            return Err("fixture fingerprint is not stable for unchanged Rust inputs".into());
+        }
+
+        std::fs::write(&file, "pub fn changed() {}\n")?;
+        let changed_scan = syntaxmesh_scanner::scan(root.path(), &["rs"])?;
+        if fingerprint_sources(&changed_scan) == first {
+            return Err("fixture fingerprint ignored changed Rust content".into());
         }
         Ok(())
     }

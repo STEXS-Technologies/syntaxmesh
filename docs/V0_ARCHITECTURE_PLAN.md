@@ -3688,6 +3688,17 @@ the broad Penelope/compact StateChronicle misses remain open. Bundles:
 `context-20261022T193521.283064Z-736a89066344` (StateChronicle repository),
 under ignored `target/context-retrieval-results/`.
 
+Bounded source-compaction retry follow-up (2026-10-22): packing no longer uses
+a fixed six-attempt ceiling when compacting already-admitted source evidence;
+the retry ceiling now scales with the bounded number of packed items and the
+five deterministic excerpt widths. A query-layer regression fixture requiring
+more than six attempts passes, and all 79 `syntaxmesh-query` tests plus strict
+Clippy pass. Three fresh whole-repository Penelope runs on the same tracked
+input fingerprint remain 12/15 at 2,048 tokens and 15/15 at 8,192 tokens. The
+broad `BlobRef::verify` question still misses at 2,048 tokens, so this bounded
+edge-case fix does not resolve that retrieval-quality issue or justify changing
+the opt-in default. Evidence: `target/context-retrieval-results/context-20261022T194930.320625Z-3eea60734370/`.
+
 ECMAScript receiver-scope precision (2026-09-30): Oxc class/function boundaries
 now distinguish a named method's `this` context from ordinary nested functions
 and object methods. Arrows preserve lexical context; dynamic/anonymous receivers

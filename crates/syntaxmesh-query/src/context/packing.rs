@@ -3,7 +3,7 @@ use syntaxmesh_api_model::{ContextItem, ContextItemKind, ContextPack, OmittedCon
 use super::{Candidate, ContextTokenCounter, finalize_count};
 use crate::QueryError;
 
-const COMPLETE_CANDIDATE_RETRY_LIMIT: usize = 6;
+const EXCERPT_WINDOW_VARIANTS: usize = 5;
 
 #[cfg(test)]
 mod tests;
@@ -97,7 +97,10 @@ fn admit_after_compacting_source(
     let original_token_count = pack.token_count;
     let original_omitted = pack.omitted;
     let mut best_excerpt_pack = None;
-    let mut complete_retries_remaining = COMPLETE_CANDIDATE_RETRY_LIMIT;
+    // Each existing source can produce one candidate for each bounded window
+    // width. The selected context itself is bounded, so this retry ceiling is
+    // bounded while still allowing every packed source to be compacted.
+    let mut complete_retries_remaining = pack.items.len().saturating_mul(EXCERPT_WINDOW_VARIANTS);
     'existing_items: for item_index in (0..pack.items.len()).rev() {
         let Some(existing) = pack.items.get(item_index).cloned() else {
             continue;

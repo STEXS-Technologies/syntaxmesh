@@ -197,6 +197,60 @@ fn candidate_retries_complete_source_after_compacting_lower_priority_evidence()
 }
 
 #[test]
+fn candidate_compacts_more_than_six_existing_sources_when_needed() -> Result<(), crate::QueryError>
+{
+    let mut context = pack(64 * 1024);
+    for index in 0..8 {
+        let long_line = format!("let unrelated_{index} = {};", "x".repeat(100));
+        let source = std::iter::repeat_n(long_line.as_str(), 8)
+            .chain(std::iter::once("expected version reducer;"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let candidate = source_candidate(&source);
+        if !try_item(
+            &mut context,
+            candidate.item,
+            OmittedContextSummary::default(),
+            &ByteCounter,
+        )? {
+            return Err(crate::QueryError::Context(
+                "fixture source did not fit its initial pack".to_owned(),
+            ));
+        }
+    }
+
+    let target = source_candidate(&format!("expected version reducer {}", "y".repeat(400)));
+    let original_count = context.items.len();
+    context.token_budget = 6_000;
+    let mut scan_bytes = 8 * 1024 * 1024;
+    let mut excerpt_bytes = 256 * 1024;
+    if !try_candidate(
+        &mut context,
+        &target,
+        OmittedContextSummary::default(),
+        &ByteCounter,
+        &mut scan_bytes,
+        &mut excerpt_bytes,
+    )? {
+        return Err(crate::QueryError::Context(
+            "candidate did not fit after compacting all lower-priority sources".to_owned(),
+        ));
+    }
+    if context.items.len() != original_count + 1
+        || context
+            .items
+            .last()
+            .is_none_or(|item| item.node_ids != target.item.node_ids)
+        || context.token_count > context.token_budget
+    {
+        return Err(crate::QueryError::Context(
+            "multi-source compaction changed candidate identity or exceeded budget".to_owned(),
+        ));
+    }
+    Ok(())
+}
+
+#[test]
 fn short_complete_candidate_is_retried_after_compacting_existing_source()
 -> Result<(), crate::QueryError> {
     let mut earlier_lines = vec!["unrelated source evidence with repeated words".to_owned(); 24];

@@ -200,12 +200,25 @@ fn engine_retains_contract_history_through_penelope_and_recovers_it()
             limit: 1,
         },
     )?;
+    let as_of = engine.contract_result_as_of(&database, generation, "entry-calls-writer", "1")?;
+    let unknown_generation = GenerationId::derive(&[b"unknown-as-of-generation"]);
+    if engine
+        .contract_result_as_of(&database, unknown_generation, "entry-calls-writer", "1")
+        .is_ok()
+    {
+        return Err("as-of lookup accepted an unknown canonical generation".into());
+    }
     if result.evaluation.generation != generation
         || expected.first().map(|evaluation| evaluation.id) != Some(result.evaluation.id)
         || history.items.first() != Some(&result)
         || history.next_cursor.is_some()
+        || as_of.target_generation != generation
+        || as_of.target_sequence != receipt.generation_sequence
+        || as_of.evaluation.as_ref() != Some(&result)
     {
-        return Err("engine materialization changed generation-pinned evaluation".into());
+        return Err(
+            "engine materialization changed generation-pinned evaluation or as-of selection".into(),
+        );
     }
     if engine.recover_inference()?.contract_history != 0 {
         return Err("completed contract history was counted as pending recovery".into());

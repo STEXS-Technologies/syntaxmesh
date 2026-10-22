@@ -45,6 +45,17 @@ pub struct ContractHistoryAdvanceReceipt {
     pub last_watermark: ContractHistoryWatermark,
 }
 
+/// Latest retained evaluation no newer than a pinned canonical generation.
+///
+/// `evaluation` can be older than `target_generation`; compare its generation to the target before
+/// interpreting it as a result for that exact graph state.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ContractResultAsOf {
+    pub target_generation: syntaxmesh_core::GenerationId,
+    pub target_sequence: u64,
+    pub evaluation: Option<RetainedContractEvaluation>,
+}
+
 impl<S: GraphStore + DurableRecordStore, E: LanguageExtractor> SyntaxMeshEngine<S, E> {
     /// Recover baselines, parent setups, then stream initialization and successors.
     /// Database migrations remain explicit host operations.
@@ -280,6 +291,49 @@ impl<S: GraphStore + DurableRecordStore, E: LanguageExtractor> SyntaxMeshEngine<
                 contract_version,
             )
             .map_err(|error| WorkflowError::Verification(error.to_string()))?)
+    }
+
+    /// Read the latest retained contract result at or before a selected graph generation.
+    ///
+    /// The selected generation is validated against this engine's repository and worktree. A
+    /// prior evaluation is returned as prior evidence, never relabeled as current compliance.
+    /// This is one indexed downstream lookup and does not replay or mutate canonical history.
+    ///
+    /// # Errors
+    /// Rejects unknown or foreign target generations and corrupt retained payloads.
+    pub fn contract_result_as_of(
+        &self,
+        database: impl AsRef<Path>,
+        target_generation: syntaxmesh_core::GenerationId,
+        contract_id: &str,
+        contract_version: &str,
+    ) -> Result<ContractResultAsOf, EngineError> {
+        let manifest = self.indexer.store().manifest(target_generation)?;
+        if manifest.repository != self.repository || manifest.worktree != self.worktree {
+            return Err(WorkflowError::Store(StoreError::InvalidDelta(
+                "contract result target is outside engine scope".to_owned(),
+            ))
+            .into());
+        }
+        let target_sequence = self
+            .indexer
+            .store()
+            .generation_sequence(target_generation)?;
+        let evaluation = InferenceMaterializer::open(database)
+            .map_err(|error| WorkflowError::Verification(error.to_string()))?
+            .contract_result_at_or_before(
+                self.repository,
+                self.worktree,
+                target_sequence,
+                contract_id,
+                contract_version,
+            )
+            .map_err(|error| WorkflowError::Verification(error.to_string()))?;
+        Ok(ContractResultAsOf {
+            target_generation,
+            target_sequence,
+            evaluation,
+        })
     }
 
     /// Read a bounded indexed chronological page of materialized contract results.

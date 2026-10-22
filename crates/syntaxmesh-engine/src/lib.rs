@@ -7,7 +7,10 @@ mod processing;
 mod source_planning;
 
 #[cfg(feature = "inference-sqlite")]
-pub use engine::{ContractHistoryAdvanceReceipt, ContractHistoryAdvanceRequest, InferenceRecovery};
+pub use engine::{
+    ContractHistoryAdvanceReceipt, ContractHistoryAdvanceRequest, ContractResultAsOf,
+    InferenceRecovery,
+};
 
 pub use engine::{
     Clock, EngineError, EngineIndexFreshness, EngineIntegrity, EngineReceipt, EngineStatus,

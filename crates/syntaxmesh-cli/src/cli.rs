@@ -170,6 +170,10 @@ fn print_help() -> Result<(), CliError> {
     write_stdout(
         "  syntaxmesh inference-catch-up[-turso] <canonical-store> <inference.sqlite> <through-generation> <generation-budget> <history-scan-budget> <input-bytes> <edge-visits> <output-bytes-per-generation>",
     )?;
+    #[cfg(feature = "inference-sqlite")]
+    write_stdout(
+        "  syntaxmesh inference-result-as-of[-turso] <canonical-store> <inference.sqlite> <generation> <contract-id> <contract-version>",
+    )?;
     Ok(())
 }
 
@@ -523,6 +527,10 @@ fn run(arguments: impl IntoIterator<Item = String>) -> Result<(), CliError> {
         #[cfg(feature = "inference-sqlite")]
         "inference-catch-up" | "inference-catch-up-turso" => {
             inference::catch_up(command.ends_with("-turso"), arguments)
+        }
+        #[cfg(feature = "inference-sqlite")]
+        "inference-result-as-of" | "inference-result-as-of-turso" => {
+            inference::result_as_of(command.ends_with("-turso"), arguments)
         }
         #[cfg(feature = "inference-sqlite")]
         "inference-migrate" | "inference-recover" | "inference-recover-turso" => {

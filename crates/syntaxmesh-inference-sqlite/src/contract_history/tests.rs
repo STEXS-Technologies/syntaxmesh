@@ -151,6 +151,49 @@ fn retained_contract_results_are_exact_indexed_and_restart_safe() -> Result<()> 
     {
         return Err("materialized history did not preserve generation-scoped outcomes".into());
     }
+    let before_first = materializer.contract_result_at_or_before(
+        repository,
+        worktree,
+        retained.generation_sequence.saturating_sub(1),
+        "target-not-in-concept",
+        "1",
+    )?;
+    let at_declared = materializer
+        .contract_result_at_or_before(
+            repository,
+            worktree,
+            introduced.generation_sequence,
+            "target-not-in-concept",
+            "1",
+        )?
+        .ok_or("as-of lookup missed its latest eligible result")?;
+    let before_retracted = materializer
+        .contract_result_at_or_before(
+            repository,
+            worktree,
+            introduced.generation_sequence,
+            "target-not-in-concept",
+            "1",
+        )?
+        .ok_or("as-of lookup missed the result before a later retained result")?;
+    let at_retracted = materializer
+        .contract_result_at_or_before(
+            repository,
+            worktree,
+            retracted.generation_sequence,
+            "target-not-in-concept",
+            "1",
+        )?
+        .ok_or("as-of lookup missed its latest retained result")?;
+    if before_first.is_some()
+        || at_declared.evaluation.generation != declared
+        || before_retracted.evaluation.generation != declared
+        || at_retracted.evaluation.generation != retracted_generation
+    {
+        return Err(
+            "as-of contract lookup returned an unavailable, future, or incorrect result".into(),
+        );
+    }
     let latest_set = materializer
         .latest_contract_set(repository, worktree)?
         .ok_or("missing latest retained contract set")?;
@@ -182,10 +225,25 @@ fn retained_contract_results_are_exact_indexed_and_restart_safe() -> Result<()> 
         })?
         .collect::<std::result::Result<Vec<_>, _>>()?
         .join(" ");
+    let as_of_plan = materializer
+        .connection
+        .prepare(
+            "EXPLAIN QUERY PLAN SELECT generation_sequence, generation, evaluation_id, payload, payload_digest
+             FROM inference_contract_evaluations WHERE repository = ?1 AND worktree = ?2
+             AND contract_id = ?3 AND contract_version = ?4 AND generation_sequence <= ?5
+             ORDER BY generation_sequence DESC, generation DESC LIMIT 1",
+        )?
+        .query_map(
+            rusqlite::params!["", "", "", "", 1_i64],
+            |row| row.get::<_, String>(3),
+        )?
+        .collect::<std::result::Result<Vec<_>, _>>()?
+        .join(" ");
     if !point_plan.contains("inference_contract_evaluations_at")
         || !history_plan.contains("inference_contract_evaluations_history")
+        || !as_of_plan.contains("inference_contract_evaluations_history")
     {
-        return Err(format!("contract result reads did not use their dedicated temporal indexes: point={point_plan}; history={history_plan}").into());
+        return Err(format!("contract result reads did not use their dedicated temporal indexes: point={point_plan}; history={history_plan}; as_of={as_of_plan}").into());
     }
     let first_page =
         materializer.contract_history(&history_query(repository, worktree, None, 1))?;
@@ -249,6 +307,15 @@ fn retained_contract_results_are_exact_indexed_and_restart_safe() -> Result<()> 
     if reopened.contract_result_at(repository, worktree, first, "target-not-in-concept", "1")?
         != Some(first_result)
         || reopened
+            .contract_result_at_or_before(
+                repository,
+                worktree,
+                introduced.generation_sequence,
+                "target-not-in-concept",
+                "1",
+            )?
+            .is_none_or(|item| item.evaluation.generation != declared)
+        || reopened
             .contract_history(&history_query(repository, worktree, None, 10))?
             .items
             .len()
@@ -272,6 +339,18 @@ fn retained_contract_results_are_exact_indexed_and_restart_safe() -> Result<()> 
         .is_ok()
     {
         return Err("tampered retained contract result passed checksum validation".into());
+    }
+    if reopened
+        .contract_result_at_or_before(
+            repository,
+            worktree,
+            retained.generation_sequence,
+            "target-not-in-concept",
+            "1",
+        )
+        .is_ok()
+    {
+        return Err("as-of lookup accepted a tampered retained result".into());
     }
     reopened.connection.execute(
         "UPDATE inference_contract_evaluations SET payload = X'00' WHERE operation = ?1 AND contract_id = 'target-not-in-concept'",

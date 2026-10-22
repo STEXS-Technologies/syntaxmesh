@@ -287,6 +287,65 @@ impl InferenceMaterializer {
         .transpose()
     }
 
+    /// Read the latest retained result for one contract at or before a canonical sequence.
+    ///
+    /// The returned generation is the generation actually evaluated; callers must not treat an
+    /// older result as compliance at the requested sequence.
+    ///
+    /// # Errors
+    /// Returns an error for invalid identities or inconsistent stored payloads/checksums.
+    pub fn contract_result_at_or_before(
+        &self,
+        repository: RepositoryId,
+        worktree: WorktreeId,
+        through_sequence: u64,
+        contract_id: &str,
+        contract_version: &str,
+    ) -> Result<Option<RetainedContractEvaluation>> {
+        if contract_id.is_empty() || contract_version.is_empty() {
+            return Err("contract identity must not be empty".into());
+        }
+        let row = self
+            .connection
+            .query_row(
+                "SELECT generation_sequence, generation, evaluation_id, payload, payload_digest
+             FROM inference_contract_evaluations
+             WHERE repository = ?1 AND worktree = ?2 AND contract_id = ?3
+               AND contract_version = ?4 AND generation_sequence <= ?5
+             ORDER BY generation_sequence DESC, generation DESC LIMIT 1",
+                params![
+                    repository.0.to_hex(),
+                    worktree.0.to_hex(),
+                    contract_id,
+                    contract_version,
+                    i64::try_from(through_sequence)?
+                ],
+                |row| {
+                    Ok((
+                        row.get::<_, i64>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, Vec<u8>>(3)?,
+                        row.get::<_, String>(4)?,
+                    ))
+                },
+            )
+            .optional()?;
+        row.map(|(sequence, generation, evaluation_id, payload, digest)| {
+            let generation = parse_generation(&generation)?;
+            let item = decode_payload(sequence, &payload, &digest)?;
+            if item.evaluation.generation != generation
+                || item.evaluation.id.to_hex() != evaluation_id
+                || item.contract.id != contract_id
+                || item.contract.version != contract_version
+            {
+                return Err("as-of contract result key differs from retained payload".into());
+            }
+            Ok(item)
+        })
+        .transpose()
+    }
+
     /// Read a bounded chronological page for one stable contract identity/version.
     ///
     /// # Errors

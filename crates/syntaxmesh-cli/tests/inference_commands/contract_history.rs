@@ -23,6 +23,12 @@ fn prepare_and_catch_up<S: GraphStore>(
     let (rule, declared, retracted) = fixture::fixture(&mut store)?;
     fixture::verify(&store, &rule, declared, retracted)?;
     fixture::verify_restoration(&mut store, &rule, declared, retracted)?;
+    let latest_generation = store
+        .generation_history()?
+        .last()
+        .ok_or("fixture has no current generation after restoration")?
+        .manifest
+        .generation;
     let first = store
         .manifest(declared)?
         .parent
@@ -128,6 +134,81 @@ fn prepare_and_catch_up<S: GraphStore>(
         .collect::<Vec<_>>();
     if generations != [first, declared, retracted] {
         return Err("CLI catch-up did not retain ordered results for every successor".into());
+    }
+    let as_of_command = if command.ends_with("-turso") {
+        "inference-result-as-of-turso"
+    } else {
+        "inference-result-as-of"
+    };
+    let exact = invoke(&[
+        as_of_command,
+        text(canonical)?,
+        text(downstream)?,
+        &retracted_generation,
+        "target-not-in-concept",
+        "1",
+    ])?;
+    let stale = invoke(&[
+        as_of_command,
+        text(canonical)?,
+        text(downstream)?,
+        &latest_generation.0.to_hex(),
+        "target-not-in-concept",
+        "1",
+    ])?;
+    let unavailable = invoke(&[
+        as_of_command,
+        text(canonical)?,
+        text(downstream)?,
+        &latest_generation.0.to_hex(),
+        "not-retained",
+        "1",
+    ])?;
+    for command_output in [&exact, &stale, &unavailable] {
+        if !command_output.status.success() {
+            return Err(String::from_utf8_lossy(&command_output.stderr)
+                .into_owned()
+                .into());
+        }
+    }
+    let exact_result: serde_json::Value = serde_json::from_slice(&exact.stdout)?;
+    let stale_result: serde_json::Value = serde_json::from_slice(&stale.stdout)?;
+    let unavailable_result: serde_json::Value = serde_json::from_slice(&unavailable.stdout)?;
+    if exact_result
+        .get("freshness")
+        .and_then(serde_json::Value::as_str)
+        != Some("current")
+        || exact_result
+            .get("evaluation_generation")
+            .and_then(serde_json::Value::as_str)
+            != Some(retracted_generation.as_str())
+        || stale_result
+            .get("freshness")
+            .and_then(serde_json::Value::as_str)
+            != Some("stale")
+        || stale_result
+            .get("evaluation_generation")
+            .and_then(serde_json::Value::as_str)
+            != Some(retracted_generation.as_str())
+        || unavailable_result
+            .get("freshness")
+            .and_then(serde_json::Value::as_str)
+            != Some("unavailable")
+        || unavailable_result.get("evaluation") != Some(&serde_json::Value::Null)
+        || InferenceMaterializer::open(downstream)?
+            .contract_history(&syntaxmesh_inference_sqlite::ContractHistoryQuery {
+                repository: manifest.repository,
+                worktree: manifest.worktree,
+                contract_id: "target-not-in-concept".to_owned(),
+                contract_version: "1".to_owned(),
+                after: None,
+                limit: 10,
+            })?
+            .items
+            .len()
+            != 3
+    {
+        return Err("as-of CLI did not distinguish current, stale, and unavailable results".into());
     }
     Ok(())
 }

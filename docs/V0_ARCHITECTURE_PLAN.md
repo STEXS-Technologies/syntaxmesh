@@ -239,6 +239,19 @@ CLI pagination/catch-up tests pass. This is caller-triggered catch-up, not
 publication-time scheduling or authored-contract lifecycle; drift summaries
 and the broader v2/v5 temporal reasoning gates remain open.
 
+[ADR-0383](adr/0383-indexed-contract-result-as-of-lookup.md) adds a one-row
+indexed lookup for the latest retained result no later than a selected
+generation. The Engine validates generation scope and returns both the target
+and the actual evaluation coordinates; File/Turso CLI output distinguishes
+`current`, `stale`, and `unavailable` without treating a prior result as
+compliance at a later generation. It reuses the existing history index and
+downstream store, with no migration, replay, or write. This adds a temporal
+point-read primitive for v5 contract history; exact compliance at a generation
+still requires an evaluation at that exact generation. It preserves the
+critical rule that stale evidence is not a current compliance conclusion; automated
+evaluation, authored-contract lifecycle, richer drift summaries, and broader
+v0–v5 acceptance remain open.
+
 After this retrieval and target-discovery change, `cargo make ci` passed in
 184.40 seconds on 2026-10-22. It covered workspace formatting, architecture,
 extension isolation, migration registries, instrumented/default checks, audit

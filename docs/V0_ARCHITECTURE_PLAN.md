@@ -154,6 +154,17 @@ signatures, unknown definitions and exhausted work budgets; targeted inference
 tests, strict Clippy and formatting pass. Durable ontology catalog history and
 semantic compatibility policy remain open.
 
+[ADR-0376](adr/0376-evidence-bounded-semantic-contract-evaluation.md) adds a
+pure bounded evaluator for explicit required/forbidden relation contracts over
+one selected graph generation. Exact retained edges produce supported or
+contradicted outcomes and cite their opening fact version; absent edges remain
+`InsufficientEvidence`, never implied compliance or violation. Contracts retain
+their origin and results receive deterministic generation-scoped identities.
+Targeted inference tests cover evidence, absence, malformed/duplicate batches,
+generation validation and byte/visit/result bounds. Durable contract history,
+general predicates, severity policy, host delivery, and temporal drift remain
+open; this is one v2 contract primitive, not completion of v2 or v0–v5.
+
 After this retrieval and target-discovery change, `cargo make ci` passed in
 184.40 seconds on 2026-10-22. It covered workspace formatting, architecture,
 extension isolation, migration registries, instrumented/default checks, audit

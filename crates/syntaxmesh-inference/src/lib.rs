@@ -1,5 +1,6 @@
 //! Optional deterministic reasoning; never mutates canonical facts.
 
+mod contracts;
 mod dependency_index;
 mod discovery;
 mod evaluator;
@@ -10,6 +11,10 @@ mod operation_identity;
 mod rule_set;
 mod witness;
 
+pub use contracts::{
+    Contract, ContractEvaluation, ContractLimits, ContractOrigin, ContractOutcome,
+    RelationExpectation, evaluate_contracts,
+};
 pub use dependency_index::PremiseDependencyIndex;
 pub use discovery::discover_rules;
 pub use evaluator::evaluate;

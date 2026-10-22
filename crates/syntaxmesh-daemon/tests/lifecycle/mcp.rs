@@ -12,6 +12,20 @@ fn tool_json(result: rmcp::model::CallToolResult) -> Result<Value, Box<dyn Error
     Ok(serde_json::from_str(&content.text)?)
 }
 
+fn node_names(value: &Value, field: &str) -> Result<Vec<String>, Box<dyn Error>> {
+    let nodes = value
+        .get(field)
+        .and_then(Value::as_array)
+        .ok_or_else(|| format!("{field} missing from query response"))?;
+    let mut names = nodes
+        .iter()
+        .filter_map(|node| node.get("name").and_then(Value::as_str))
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
+    names.sort();
+    Ok(names)
+}
+
 #[test]
 fn daemon_mcp_transport_refreshes_with_watch_and_preserves_http_boundary()
 -> Result<(), Box<dyn Error>> {
@@ -47,6 +61,9 @@ fn exercise_daemon_mcp(polling: bool, indexed: bool) -> Result<(), Box<dyn Error
         .no_proxy()
         .timeout(Duration::from_secs(2))
         .build()?;
+    let http_initial = search(&client, &base, "protocol_before", None)?;
+    let http_initial_generation = generation(&http_initial)?.to_owned();
+    let http_initial_names = node_names(&http_initial, "data")?;
     for (header, value) in [
         ("origin", "https://example.com"),
         ("host", "evil.example"),
@@ -113,6 +130,13 @@ fn exercise_daemon_mcp(polling: bool, indexed: bool) -> Result<(), Box<dyn Error
         {
             return Err::<(), Box<dyn Error>>("MCP protocol initial search missing".into());
         }
+        if generation(&initial)? != http_initial_generation
+            || node_names(&initial, "nodes")? != http_initial_names
+        {
+            return Err::<(), Box<dyn Error>>(
+                "daemon HTTP and MCP searches differ for the same accepted generation".into(),
+            );
+        }
         let old = generation(&initial)?.to_owned();
         if indexed {
             let context = tool_json(
@@ -134,7 +158,7 @@ fn exercise_daemon_mcp(polling: bool, indexed: bool) -> Result<(), Box<dyn Error
         }
         std::fs::write(&file, "pub fn protocol_after() {}")?;
         let waiting = Instant::now();
-        loop {
+        let after = loop {
             let after = tool_json(
                 service
                     .peer()
@@ -149,12 +173,27 @@ fn exercise_daemon_mcp(polling: bool, indexed: bool) -> Result<(), Box<dyn Error
                     .and_then(Value::as_array)
                     .is_some_and(|nodes| !nodes.is_empty())
             {
-                break;
+                break after;
             }
             if waiting.elapsed() > Duration::from_secs(3) {
                 return Err("MCP protocol failed to refresh after save".into());
             }
             tokio::time::sleep(Duration::from_millis(10)).await;
+        };
+        let http_client = client.clone();
+        let http_base = base.clone();
+        let http_after = tokio::task::spawn_blocking(move || {
+            search(&http_client, &http_base, "protocol_after", None)
+                .map_err(|error| error.to_string())
+        })
+        .await?
+        .map_err(std::io::Error::other)?;
+        if generation(&after)? != generation(&http_after)?
+            || node_names(&after, "nodes")? != node_names(&http_after, "data")?
+        {
+            return Err::<(), Box<dyn Error>>(
+                "daemon HTTP and MCP searches differ after the same watched edit".into(),
+            );
         }
         // Keep the SDK session open across termination: shutdown must not wait
         // for the client to close its event stream first.

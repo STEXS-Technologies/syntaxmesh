@@ -3640,6 +3640,27 @@ estimates or an SLA. Source-content remains opt-in. Repeat runs, bounded
 cold-build-cost evaluation, and multi-corpus quality checks remain required
 before changing the ranking policy.
 
+Post-ADR-0389 whole-repository recheck (2026-10-22): fresh tracked-file
+evaluations on the current SyntaxMesh commit add two negative/partial signals.
+Penelope (93 supported tracked files; input fingerprint
+`8d25a4630baf78b431cebcf70b0fe47fcb20715a8c4928305e698dd7fea900d9`) retrieved
+9/12 target-budget checks at both 2,048 and 8,192 tokens in all three fresh
+indexes. `BlobRef::verify` remained omitted at both budgets; diagnostics place
+it at identifier candidate rank 61, seed 26/32, and packing position 35/64.
+The existing `test-last` role ordering moved it to packing position 28/64 but
+did not recover it in three runs, so that preference is not a remedy. A separate
+one-run StateChronicle evaluation (238 tracked supported files; input
+fingerprint `10d30dd037223847eec4d12175534713b5aa4996c969e87114bd38a91c244d30`)
+retrieved 1/3 targets at 2,048 tokens and 3/3 at 8,192. Both external worktrees
+were dirty, and their input fingerprints differ from earlier whole-repository
+captures; these runs cannot establish a regression or a quality trend. They
+confirm that compact-budget ordering remains open and that no default ranking
+change is justified. Evidence bundles:
+`context-20261022T190750.747308Z-07b661a01413` (Penelope balanced),
+`context-20261022T191214.285357Z-07b661a01413` (Penelope test-last), and
+`context-20261022T191638.966025Z-07b661a01413` (StateChronicle), all under
+ignored `target/context-retrieval-results/`.
+
 ECMAScript receiver-scope precision (2026-09-30): Oxc class/function boundaries
 now distinguish a named method's `this` context from ordinary nested functions
 and object methods. Arrows preserve lexical context; dynamic/anonymous receivers

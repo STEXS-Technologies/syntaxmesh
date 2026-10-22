@@ -3563,6 +3563,23 @@ Exit: embedded and standalone hosts behave equivalently; an extension failure is
 
 ### Gate 5 — v0.1 product completion
 
+Current-revision Penelope compact-budget diagnostic (2026-10-22): a fresh
+three-index repeat on the same 93-file tracked-input fingerprint
+`8d25a4630baf78b431cebcf70b0fe47fcb20715a8c4928305e698dd7fea900d9`
+reproduced 12/15 broad/explicit fixed-target checks at 2,048 tokens and 15/15
+at 8,192. The sole miss is the broad checkpoint-schema query: its target is
+still discovered (seed 26/32, packing position 35/64), while the explicit
+`BlobRef::verify` query ranks it seed 4 and packing position 6 and retrieves it.
+A target-seeded diagnostic packs the same evidence within 2,048 tokens. This
+isolates the observed miss to query-dependent ordering/competition in a dense
+repository context—not missing source bytes or an insufficient global budget.
+The next retrieval change must improve general source-content ordering and be
+rechecked against the approved STEXS corpora; do not raise shared caps or add a
+target-specific exception from this result. Evidence from commit `6fa7ac1` is
+under ignored `target/context-retrieval-results/context-20261022T220303.991648Z-6fa7ac167eaf/`
+and the one-run target diagnostic is under
+`target/context-retrieval-results/context-20261022T220620.554688Z-6fa7ac167eaf/`.
+
 STEXS-only context retrieval quality expansion (2026-10-22): the fixed-target
 retrieval harness now accepts the approved Shardline, Penelope, and
 StateChronicle repositories and rejects other origins. Three fresh-index runs

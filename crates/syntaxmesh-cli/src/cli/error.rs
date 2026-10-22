@@ -23,6 +23,7 @@ pub(super) enum CliError {
     ModuleResolution(ModuleResolutionError),
     PythonModuleResolution(String),
     SemanticProvider(String),
+    ContractPolicyFailed,
 }
 
 impl std::fmt::Display for CliError {
@@ -46,6 +47,7 @@ impl std::fmt::Display for CliError {
                 write!(formatter, "Python module resolver setup failed: {error}")
             }
             Self::SemanticProvider(error) => write!(formatter, "semantic provider failed: {error}"),
+            Self::ContractPolicyFailed => write!(formatter, "contract policy failed"),
         }
     }
 }

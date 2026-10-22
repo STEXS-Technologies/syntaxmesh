@@ -954,6 +954,7 @@ syntaxmesh inference-sync /path/to/state/graph.snapshot /path/to/state/inference
 syntaxmesh inference-checkpoint /path/to/state/inference.sqlite "$baseline_generation" /path/to/state/origin.json
 syntaxmesh inference-claims-page /path/to/state/inference.sqlite "$baseline_generation" /path/to/state/origin.json 100 1048576 10000 10000
 syntaxmesh inference-retain-contracts /path/to/state/graph.snapshot /path/to/state/inference.sqlite "$generation" /path/to/contracts.json
+syntaxmesh inference-contract-check /path/to/state/graph.snapshot "$generation" /path/to/contracts.json --fail-on Contradicted,InsufficientEvidence
 syntaxmesh inference-catch-up /path/to/state/graph.snapshot /path/to/state/inference.sqlite "$through_generation" 100 10000 1048576 100000 1048576
 syntaxmesh inference-result-as-of /path/to/state/graph.snapshot /path/to/state/inference.sqlite "$selected_generation" target-not-in-concept 1
 syntaxmesh inference-outcome-as-of /path/to/state/graph.snapshot /path/to/state/inference.sqlite "$selected_generation" target-not-in-concept 1
@@ -995,8 +996,16 @@ example:
 The file contains the whole contract set for that generation. An identical
 same-generation retry is idempotent; a changed set must use a later generation.
 Contracts omitted from a later replacement stop being the catch-up baseline,
-but all earlier evaluations remain in history. This records evidence and
-outcomes; it does not enforce policy or run automatically at graph publication.
+but all earlier evaluations remain in history. Retention records evidence and
+outcomes; it does not itself enforce policy or run automatically at graph
+publication.
+
+`inference-contract-check[-turso]` evaluates the supplied contracts against
+one explicit accepted generation without retaining or mutating results. It
+requires a caller-selected, non-empty `--fail-on` list (`Supported`,
+`Contradicted`, and/or `InsufficientEvidence`); it emits bounded versioned JSON
+and exits nonzero when any evaluation matches that list. There is no default
+severity policy. This one-shot gate does not schedule checks on publication.
 
 `inference-catch-up` advances the latest already-retained contract set over each
 immediate canonical successor through `through_generation`; it does not require

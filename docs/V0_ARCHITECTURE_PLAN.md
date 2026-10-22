@@ -237,9 +237,9 @@ current or explicitly selected retained generations, bounds contracts and
 history/work budgets, and serializes exact evidence versions while preserving
 `insufficient_evidence`. MCP tool discovery, successful supported/indeterminate
 results, invalid relation rejection, and the stdio protocol are covered.
-Durable authored contracts/results, policy enforcement, and measured harness
-benefit remain open; this advances v2/v4 integration but is not release
-completion.
+Durable authored contracts/results and measured harness benefit remain open;
+caller-defined CLI outcome gating is added separately in ADR-0393. This advances
+v2/v4 integration but is not release completion.
 
 [ADR-0379](adr/0379-indexed-contract-evidence-evaluation.md) replaces the
 contract-by-premise nested scan with one bounded, query-local exact-relation
@@ -260,7 +260,7 @@ cover interruption before the effect and after SQL commit; migration rollback,
 checksum, temporal outcome, pagination, restart, and query-plan tests cover the
 SQLite layer. This is the first v5 Stage C slice only: authored contract
 ingestion, richer predicates, automated incremental evaluation, temporal drift
-summaries, and policy enforcement remain open. A feature-enabled Engine fixture
+summaries, and durable/organization-level policy remain open. A feature-enabled Engine fixture
 also compares receipts/results under durable versus opt-in StateChronicle
 publication and confirms verification status is the only changed dimension.
 Full `cargo make ci` passed in 180.36 seconds on 2026-10-22 with DuckDB excluded
@@ -3358,6 +3358,16 @@ state after failure, File/Turso publication, and verified-history status. Daemon
 configuration and scheduling, authenticated remote peers, concurrency policy,
 and stronger OS sandboxing remain open; process-group supervision alone is not
 a security boundary.
+
+[ADR-0393](adr/0393-generation-pinned-contract-policy-gate.md) adds a
+read-only, generation-pinned File/Turso CLI contract gate. Callers must name the
+outcomes that fail their policy; the command emits bounded JSON before returning
+a nonzero status on a match. The inference-enabled CLI integration suite covers
+passing/permitting and failing policies, invalid policy lists, output generation
+pinning, and both canonical stores. Strict Clippy, formatting, architecture
+dependency checks, and inference migration registry checks pass. This does not
+provide publication-time scheduling or durable organization policy.
+
 The independent-producer additions passed full `cargo make ci` on Linux in
 115.85 seconds; this does not establish HTTP/daemon acceptance or hosted-platform
 results. The strengthened dependency guard additionally has a focused regression

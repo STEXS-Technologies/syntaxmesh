@@ -7,6 +7,8 @@ mod setup;
 pub(super) use setup::setup;
 mod author;
 pub(super) use author::retain_contracts;
+mod contract_check;
+pub(super) use contract_check::check_contracts;
 mod as_of;
 pub(super) use as_of::result_as_of;
 mod outcome_as_of;

@@ -193,6 +193,10 @@ fn print_help() -> Result<(), CliError> {
     write_stdout(
         "  syntaxmesh inference-retain-contracts[-turso] <canonical-store> <inference.sqlite> <generation> <contracts.json>",
     )?;
+    #[cfg(feature = "inference-sqlite")]
+    write_stdout(
+        "  syntaxmesh inference-contract-check[-turso] <canonical-store> <generation> <contracts.json> --fail-on <Supported[,Contradicted][,InsufficientEvidence]>",
+    )?;
     Ok(())
 }
 
@@ -566,6 +570,10 @@ fn run(arguments: impl IntoIterator<Item = String>) -> Result<(), CliError> {
         #[cfg(feature = "inference-sqlite")]
         "inference-retain-contracts" | "inference-retain-contracts-turso" => {
             inference::retain_contracts(command.ends_with("-turso"), arguments)
+        }
+        #[cfg(feature = "inference-sqlite")]
+        "inference-contract-check" | "inference-contract-check-turso" => {
+            inference::check_contracts(command.ends_with("-turso"), arguments)
         }
         #[cfg(feature = "inference-sqlite")]
         "inference-migrate" | "inference-recover" | "inference-recover-turso" => {

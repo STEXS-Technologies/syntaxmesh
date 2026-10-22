@@ -57,6 +57,56 @@ fn run_authoring_lifecycle(
     write_contracts(&conflicting_v1, "1", "required")?;
     write_contracts(&configuration_v2, "2", "required")?;
     write_contracts(&stale_v3, "3", "forbidden")?;
+    let check_command = format!("inference-contract-check{command_suffix}");
+    let check = invoke(&[
+        check_command.as_str(),
+        text(canonical)?,
+        &declared.0.to_hex(),
+        text(&configuration_v1)?,
+        "--fail-on",
+        "Contradicted,InsufficientEvidence",
+    ])?;
+    if check.status.success() {
+        return Err("explicit contract failure policy passed a contradicted contract".into());
+    }
+    let check_result: serde_json::Value = serde_json::from_slice(&check.stdout)?;
+    let check_outcome = check_result
+        .get("evaluations")
+        .and_then(serde_json::Value::as_array)
+        .and_then(|evaluations| evaluations.first())
+        .and_then(|evaluation| evaluation.get("outcome"))
+        .and_then(serde_json::Value::as_str);
+    if check_result.get("version") != Some(&serde_json::json!(1))
+        || check_result.get("generation") != Some(&serde_json::json!(declared.0.to_hex()))
+        || check_result.get("passed") != Some(&serde_json::json!(false))
+        || check_outcome != Some("Contradicted")
+    {
+        return Err("contract check omitted its pinned generation or policy result".into());
+    }
+    let permitted = invoke(&[
+        check_command.as_str(),
+        text(canonical)?,
+        &declared.0.to_hex(),
+        text(&configuration_v1)?,
+        "--fail-on",
+        "Supported",
+    ])?;
+    if !permitted.status.success() {
+        return Err("contract check ignored an explicit policy that permits contradiction".into());
+    }
+    for invalid_policy in ["", "contradicted", "Contradicted,Contradicted"] {
+        let invalid = invoke(&[
+            check_command.as_str(),
+            text(canonical)?,
+            &declared.0.to_hex(),
+            text(&configuration_v1)?,
+            "--fail-on",
+            invalid_policy,
+        ])?;
+        if invalid.status.success() {
+            return Err("contract check accepted an invalid failure policy".into());
+        }
+    }
     InferenceMaterializer::migrate(downstream)?;
     let author = format!("inference-retain-contracts{command_suffix}");
     let catch_up = format!("inference-catch-up{command_suffix}");

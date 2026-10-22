@@ -386,7 +386,6 @@ fn context_sibling_source_retrieval_evaluation() -> Result<(), Box<dyn Error>> {
             "SYNTAXMESH_CONTEXT_PATH_IDENTIFIER_INDEX_PROBE",
             "SYNTAXMESH_CONTEXT_MIXED_SEED_PROBE",
             "SYNTAXMESH_CONTEXT_DEFINITION_SEED_PROBE",
-            "SYNTAXMESH_CONTEXT_TARGET_SEED_PROBE",
         ]
         .iter()
         .any(|name| std::env::var_os(name).is_some())
@@ -929,6 +928,30 @@ fn context_sibling_source_retrieval_evaluation() -> Result<(), Box<dyn Error>> {
                                 .and_then(Value::as_array)
                                 .is_some_and(|ids| ids.iter().any(|id| id == &target_record))
                     });
+                let target_items = value
+                    .get("items")
+                    .and_then(Value::as_array)
+                    .into_iter()
+                    .flatten()
+                    .filter(|item| {
+                        item.get("node_ids")
+                            .and_then(Value::as_array)
+                            .is_some_and(|ids| ids.iter().any(|id| id == &target_record))
+                    })
+                    .filter_map(|item| {
+                        Some(serde_json::json!({
+                            "kind": item.get("kind")?,
+                            "text": item.get("text")?,
+                            "source_path": item.get("source_path"),
+                            "line_start": item.get("line_start"),
+                            "line_end": item.get("line_end"),
+                        }))
+                    })
+                    .collect::<Vec<_>>();
+                eprintln!(
+                    "context_target_seed_items corpus={corpus} case={case_id} budget={budget} items={}",
+                    serde_json::to_string(&target_items)?
+                );
                 eprintln!(
                     "context_target_seed_probe corpus={corpus} case={case_id} budget={budget} retrieved={retrieved} tokens={tokens}"
                 );

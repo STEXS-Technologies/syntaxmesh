@@ -301,6 +301,13 @@ fn context_sibling_source_retrieval_evaluation() -> Result<(), Box<dyn Error>> {
                 "Function",
             ),
             (
+                "penelope_task_blob_integrity",
+                "How does task blob verification check schema, byte count, and digest integrity?",
+                "BlobRef::verify",
+                "crates/penelope-core/src/task/contracts.rs",
+                "Function",
+            ),
+            (
                 "penelope_task_schema_symbol",
                 "How does BlobRef::verify validate checkpoint bytes and schema?",
                 "BlobRef::verify",

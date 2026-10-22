@@ -3580,6 +3580,20 @@ under ignored `target/context-retrieval-results/context-20261022T220303.991648Z-
 and the one-run target diagnostic is under
 `target/context-retrieval-results/context-20261022T220620.554688Z-6fa7ac167eaf/`.
 
+Retrieval-evaluation query calibration (2026-10-22): the Penelope fixed-target
+matrix now keeps the broad paraphrase and explicit-symbol query and adds a
+natural-language query grounded in the implementation's documented checks
+(task-blob schema, byte count, and digest). Across three more fresh indexes on
+the same external input fingerprint, the new query and explicit-symbol query
+each retrieve `BlobRef::verify` 3/3 times at both budgets; the broad paraphrase
+still misses 3/3 times at 2,048 tokens and succeeds 3/3 times at 8,192. The
+full matrix is 15/18 at 2,048 and 18/18 at 8,192. This strengthens the
+distinction between source-grounded lexical retrieval and the still-open
+broader paraphrase case; no production ranking behavior changed. The harness
+validates six Penelope cases at both budgets. Evidence from the paired
+three-run evaluation is under ignored
+`target/context-retrieval-results/context-20261022T221301.217003Z-a0fd5a4c053c/`.
+
 STEXS-only context retrieval quality expansion (2026-10-22): the fixed-target
 retrieval harness now accepts the approved Shardline, Penelope, and
 StateChronicle repositories and rejects other origins. Three fresh-index runs

@@ -69,6 +69,8 @@ const PROVENANCE_FACT: i64 = 1;
 const NODE_FACT: i64 = 2;
 const EDGE_FACT: i64 = 3;
 const INCIDENT_EDGE_NODE_BATCH_SIZE: usize = 128;
+const DROP_TEMPORAL_FACT_SECONDARY_INDEXES: &str = "DROP INDEX IF EXISTS syntaxmesh_fact_versions_identity_time_idx; DROP INDEX IF EXISTS syntaxmesh_fact_versions_time_idx; DROP INDEX IF EXISTS syntaxmesh_fact_versions_observed_time_idx; DROP INDEX IF EXISTS syntaxmesh_fact_versions_identity_end_idx; DROP INDEX IF EXISTS syntaxmesh_fact_versions_start_generation_idx; DROP INDEX IF EXISTS syntaxmesh_fact_versions_end_generation_idx;";
+const REBUILD_TEMPORAL_FACT_SECONDARY_INDEXES: &str = "CREATE INDEX IF NOT EXISTS syntaxmesh_fact_versions_identity_time_idx ON syntaxmesh_fact_versions(fact_kind, fact_id, valid_from_sequence, valid_until_sequence); CREATE INDEX IF NOT EXISTS syntaxmesh_fact_versions_time_idx ON syntaxmesh_fact_versions(fact_kind, valid_from_sequence, valid_until_sequence); CREATE INDEX IF NOT EXISTS syntaxmesh_fact_versions_observed_time_idx ON syntaxmesh_fact_versions(observed_at_unix_nanos, fact_kind, fact_id, valid_from_sequence) WHERE observed_at_unix_nanos IS NOT NULL; CREATE INDEX IF NOT EXISTS syntaxmesh_fact_versions_identity_end_idx ON syntaxmesh_fact_versions(fact_kind, fact_id, valid_until_sequence, valid_from_sequence); CREATE INDEX IF NOT EXISTS syntaxmesh_fact_versions_start_generation_idx ON syntaxmesh_fact_versions(valid_from_sequence, fact_kind, fact_id); CREATE INDEX IF NOT EXISTS syntaxmesh_fact_versions_end_generation_idx ON syntaxmesh_fact_versions(valid_until_sequence, fact_kind, fact_id);";
 
 #[cfg(feature = "benchmark-instrumentation")]
 struct TransactionProfile {
@@ -467,9 +469,24 @@ impl SqliteGraphStore {
             };
             #[cfg(feature = "benchmark-instrumentation")]
             profile.mark("begin_validate_and_build_delta_mutations");
+            let defer_temporal_index_maintenance = delta.expected_base.is_none();
+            if defer_temporal_index_maintenance {
+                transaction
+                    .execute_batch(DROP_TEMPORAL_FACT_SECONDARY_INDEXES)
+                    .map_err(sql_error)?;
+                #[cfg(feature = "benchmark-instrumentation")]
+                profile.mark("initial_temporal_fact_indexes_drop");
+            }
             apply_temporal_delta(&transaction, delta, sequence, Some(&cascaded_edge_ids))?;
             #[cfg(feature = "benchmark-instrumentation")]
             profile.mark("temporal_fact_versions");
+            if defer_temporal_index_maintenance {
+                transaction
+                    .execute_batch(REBUILD_TEMPORAL_FACT_SECONDARY_INDEXES)
+                    .map_err(sql_error)?;
+                #[cfg(feature = "benchmark-instrumentation")]
+                profile.mark("initial_temporal_fact_indexes_rebuild");
+            }
             let root = if rebuild_root {
                 publish_rebuilt_persistent_root(
                     &transaction,
@@ -1269,6 +1286,9 @@ fn validate_current_schema(connection: &Connection) -> Result<(), StoreError> {
         "syntaxmesh_fact_versions_identity_time_idx",
         "syntaxmesh_fact_versions_time_idx",
         "syntaxmesh_fact_versions_observed_time_idx",
+        "syntaxmesh_fact_versions_identity_end_idx",
+        "syntaxmesh_fact_versions_start_generation_idx",
+        "syntaxmesh_fact_versions_end_generation_idx",
         "syntaxmesh_generation_acceptance_time_idx",
         "syntaxmesh_change_event_fact_lookup_idx",
         "syntaxmesh_change_events_generation_idx",

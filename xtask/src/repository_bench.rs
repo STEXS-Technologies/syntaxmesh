@@ -106,6 +106,25 @@ const SQLITE_WRAPPER_STAGES: [&str; 4] = [
     "persist_transaction",
     "publish_candidate_to_handle",
 ];
+const SQLITE_INITIAL_INDEX_STAGES: [&str; 2] = [
+    "initial_temporal_fact_indexes_drop",
+    "initial_temporal_fact_indexes_rebuild",
+];
+
+fn sqlite_publication_stages(defer_initial_indexes: bool) -> Vec<&'static str> {
+    let mut stages = vec![SQLITE_WRAPPER_STAGES[0], SQLITE_WRAPPER_STAGES[1]];
+    stages.extend(SQLITE_STAGES[..2].iter().copied());
+    if defer_initial_indexes {
+        stages.push(SQLITE_INITIAL_INDEX_STAGES[0]);
+    }
+    stages.extend(SQLITE_STAGES[2..6].iter().copied());
+    if defer_initial_indexes {
+        stages.push(SQLITE_INITIAL_INDEX_STAGES[1]);
+    }
+    stages.extend(SQLITE_STAGES[6..].iter().copied());
+    stages.extend([SQLITE_WRAPPER_STAGES[2], SQLITE_WRAPPER_STAGES[3]]);
+    stages
+}
 
 struct Patterns {
     scan: regex::Regex,
@@ -622,19 +641,44 @@ fn parse_publication(stderr: &str, selected: &str, patterns: &Patterns) -> Bench
             }
         }
         "sqlite" => {
-            let stages: Vec<&str> = [SQLITE_WRAPPER_STAGES[0], SQLITE_WRAPPER_STAGES[1]]
-                .into_iter()
-                .chain(SQLITE_STAGES)
-                .chain([SQLITE_WRAPPER_STAGES[2], SQLITE_WRAPPER_STAGES[3]])
+            let stages_by_phase_without_deferred_indexes: Vec<Vec<&str>> = PHASES
+                .iter()
+                .map(|_| sqlite_publication_stages(false))
                 .collect();
-            let expected: Vec<&str> = PHASES.iter().flat_map(|_| stages.iter().copied()).collect();
+            let stages_by_phase_with_deferred_indexes: Vec<Vec<&str>> = PHASES
+                .iter()
+                .map(|phase| sqlite_publication_stages(*phase == "initial"))
+                .collect();
+            let observed: Vec<String> = samples
+                .get("sqlite")
+                .into_iter()
+                .flatten()
+                .map(|(stage, _)| stage.clone())
+                .collect();
+            let matches_stages = |stages_by_phase: &[Vec<&str>]| {
+                stages_by_phase
+                    .iter()
+                    .flat_map(|stages| stages.iter().copied())
+                    .eq(observed.iter().map(String::as_str))
+            };
+            let stages_by_phase = if matches_stages(&stages_by_phase_with_deferred_indexes) {
+                stages_by_phase_with_deferred_indexes
+            } else if matches_stages(&stages_by_phase_without_deferred_indexes) {
+                stages_by_phase_without_deferred_indexes
+            } else {
+                return Err(format!(
+                    "benchmark diagnostics have unexpected SQLite stage sequence: {observed:?}"
+                )
+                .into());
+            };
+            let expected: Vec<&str> = stages_by_phase
+                .iter()
+                .flat_map(|stages| stages.iter().copied())
+                .collect();
             verify_sequence("SQLite", &samples, "sqlite", &expected)?;
-            for (index, phase) in PHASES.iter().enumerate() {
-                for (stage_index, stage) in stages.iter().enumerate() {
-                    let sample_index = index
-                        .checked_mul(stages.len())
-                        .and_then(|offset| offset.checked_add(stage_index))
-                        .ok_or("SQLite stage index overflow")?;
+            let mut sample_index = 0;
+            for (phase, stages) in PHASES.iter().zip(&stages_by_phase) {
+                for stage in stages {
                     let elapsed = samples
                         .get("sqlite")
                         .and_then(|items| items.get(sample_index))
@@ -646,6 +690,9 @@ fn parse_publication(stderr: &str, selected: &str, patterns: &Patterns) -> Bench
                         &format!("sqlite.{stage}"),
                         milliseconds_number(elapsed)?,
                     )?;
+                    sample_index = sample_index
+                        .checked_add(1)
+                        .ok_or("SQLite stage index overflow")?;
                 }
             }
             if samples.contains_key("turso") {

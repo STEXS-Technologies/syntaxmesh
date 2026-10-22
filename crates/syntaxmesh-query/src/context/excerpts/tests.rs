@@ -109,6 +109,7 @@ fn query_windows_are_bounded_term_relevant_and_source_located() {
         panic!("expected one-line relevant excerpt");
     };
     assert!(smallest.contains("state_reducer"));
+    assert!(!smallest.contains("unrelated_setup_value"));
     assert_eq!((*smallest_start, *smallest_end), (52, 52));
     assert!(super::query_windows("one line only", 1, "one", &mut remaining).is_empty());
     assert!(super::query_windows(&source, 1, "unmatched query terms", &mut remaining).is_empty());

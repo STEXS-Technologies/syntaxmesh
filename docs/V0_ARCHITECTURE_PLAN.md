@@ -3661,6 +3661,33 @@ change is justified. Evidence bundles:
 `context-20261022T191638.966025Z-07b661a01413` (StateChronicle), all under
 ignored `target/context-retrieval-results/`.
 
+Exact single-line source excerpt correction (2026-10-22): `query_windows`
+looked up a one-line window's starting byte in a ring slot before writing the
+current line into that slot. The excerpt therefore carried the current line's
+line number but could contain an earlier/full source span, preventing a short
+relevant excerpt from fitting. The one-line window now uses the current byte
+offset, with a regression assertion that excludes unrelated preceding lines.
+To separate query specificity from candidate quality, Penelope's whole-repo
+matrix now includes both the original broad wording and an explicit
+`BlobRef::verify` query. On the same 93-file tracked-input fingerprint, the
+identifier-explicit target passed at both budgets in all three fresh indexes;
+the broad target still missed at 2,048 but passed at 8,192 in all three. The
+whole-repository StateChronicle recheck on the same 238-file fingerprint scored
+6/9 at 2,048 and 9/9 at 8,192 in three runs; compared with the preceding
+single run on this fingerprint (1/3 and 3/3), the `execute` target is now
+recovered at the smaller budget while `verify_bundle` remains omitted. Selected
+three-run source-content checks pass at both budgets for Shardline (21/21),
+Penelope (15/15, including the new identifier-explicit case), and StateChronicle
+(9/9). These are dirty external fixtures and fixed-target evidence, not
+repository-wide relevance curves or an SLA. Source-content remains opt-in and
+the broad Penelope/compact StateChronicle misses remain open. Bundles:
+`context-20261022T192727.893503Z-736a89066344` (Penelope repository),
+`context-20261022T193047.410523Z-736a89066344` (Shardline selected),
+`context-20261022T193346.374812Z-736a89066344` (Penelope selected),
+`context-20261022T193422.869955Z-736a89066344` (StateChronicle selected), and
+`context-20261022T193521.283064Z-736a89066344` (StateChronicle repository),
+under ignored `target/context-retrieval-results/`.
+
 ECMAScript receiver-scope precision (2026-09-30): Oxc class/function boundaries
 now distinguish a named method's `this` context from ordinary nested functions
 and object methods. Arrows preserve lexical context; dynamic/anonymous receivers

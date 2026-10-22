@@ -125,7 +125,11 @@ pub(super) fn query_windows(
             let Some(start_slot) = start_line.checked_rem(24) else {
                 continue;
             };
-            let Some(start) = ring.get(start_slot).map(|entry| entry.start) else {
+            let start = if width == 1 {
+                offset
+            } else if let Some(start) = ring.get(start_slot).map(|entry| entry.start) {
+                start
+            } else {
                 continue;
             };
             if content_end.saturating_sub(start) > MAX_WINDOW_BYTES {

@@ -122,7 +122,7 @@ fn file_and_turso_recovery_preserve_generation_and_reject_invalid_admission()
             }
             let receipt: serde_json::Value = serde_json::from_slice(&output.stdout)?;
             if receipt
-                != serde_json::json!({"version":1,"baselines":0,"setups":0,"stream_effects":0})
+                != serde_json::json!({"version":1,"contract_history":0,"baselines":0,"setups":0,"stream_effects":0})
             {
                 return Err("empty recovery reported effects".into());
             }

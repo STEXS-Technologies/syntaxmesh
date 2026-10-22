@@ -16,7 +16,8 @@ pub use analytics_materializer::{
 };
 #[cfg(feature = "inference-sqlite")]
 pub use inference_materializer::{
-    PenelopeInferenceLifecycle, PenelopeInferenceMaterializer, PenelopeInferenceSetup,
-    PenelopeInferenceStream, RegisteredInferenceAdmission, StreamBeginRequest,
+    ContractHistoryRequest, PenelopeInferenceLifecycle, PenelopeInferenceMaterializer,
+    PenelopeInferenceSetup, PenelopeInferenceStream, RegisteredInferenceAdmission,
+    StreamBeginRequest,
 };
 pub use semantic::PenelopeSemanticEnricher;

@@ -127,7 +127,7 @@ fn cli_recovers_prepared_parent_setup_after_reopen_without_resubmission()
             let receipt: serde_json::Value = serde_json::from_slice(&recovered.stdout)?;
             let count = usize::from(attempt == 0);
             if receipt
-                != serde_json::json!({"version":1,"baselines":count,"setups":count,"stream_effects":0})
+                != serde_json::json!({"version":1,"contract_history":0,"baselines":count,"setups":count,"stream_effects":0})
             {
                 return Err("CLI did not recover exactly the prepared dependency chain".into());
             }

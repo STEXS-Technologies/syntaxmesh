@@ -188,8 +188,29 @@ completion.
 contract-by-premise nested scan with one bounded, query-local exact-relation
 index. `edge_visits` now bounds the single premise-indexing pass; outcomes,
 lowest-EdgeId evidence selection, and generation-scoped identities are
-unchanged. Durable contract-result history (v5 Stage C) and selection
-materialization across repeated queries remain open.
+unchanged. The initial durable contract-result history layer is now present;
+reusing a materialized canonical selection across repeated request-time
+evaluation remains open.
+
+[ADR-0380](adr/0380-durable-contract-result-history.md) begins the v5 Stage C
+history layer in the downstream inference SQLite materializer. Migration 6
+retains each authored contract beside its exact generation-scoped evaluation;
+exact-generation lookup and bounded chronological history reads use dedicated
+indexes and do not replay canonical history. Publication is atomic and
+idempotent, conflicting duplicate contract/version/generation rows fail closed,
+and the full Engine path is journaled with Penelope. File/Turso recovery tests
+cover interruption before the effect and after SQL commit; migration rollback,
+checksum, temporal outcome, pagination, restart, and query-plan tests cover the
+SQLite layer. This is the first v5 Stage C slice only: authored contract
+ingestion, richer predicates, automated incremental evaluation, temporal drift
+summaries, and policy enforcement remain open. A feature-enabled Engine fixture
+also compares receipts/results under durable versus opt-in StateChronicle
+publication and confirms verification status is the only changed dimension.
+Full `cargo make ci` passed in 180.36 seconds on 2026-10-22 with DuckDB excluded
+from the routine gate. The inference-enabled SQLite, Penelope, Engine, and CLI
+paths were then exercised explicitly; strict Clippy passed on the downstream
+SQLite, Penelope, and Engine packages. The StateChronicle differential fixture
+also passes under the `inference-sqlite` feature.
 
 After this retrieval and target-discovery change, `cargo make ci` passed in
 184.40 seconds on 2026-10-22. It covered workspace formatting, architecture,

@@ -1,15 +1,217 @@
 use super::*;
-use syntaxmesh_core::{GenerationId, NodeId, RepositoryId};
-use syntaxmesh_inference::{
-    InvalidationLimits, Limits, ONTOLOGY_DEFINITION_SCHEMA_VERSION, OntologyDefinition,
-    OntologyRelationDefinition, Rule,
+use syntaxmesh_core::{
+    FileId, FileVersion, GenerationId, GenerationStatus, IndexRunId, NodeId, RelationKind,
+    RepositoryId, WorktreeId,
 };
-use syntaxmesh_inference_sqlite::{InferenceMaterializer, StreamSyncRequest};
+use syntaxmesh_inference::{
+    Contract, ContractLimits, ContractOrigin, InvalidationLimits, Limits,
+    ONTOLOGY_DEFINITION_SCHEMA_VERSION, OntologyDefinition, OntologyRelationDefinition,
+    RelationExpectation, Rule,
+};
+use syntaxmesh_inference_sqlite::{
+    ContractHistoryWatermark, InferenceMaterializer, StreamSyncRequest,
+};
+use syntaxmesh_integration_penelope::ContractHistoryRequest;
 use syntaxmesh_lang_rust::RustExtractor;
+use syntaxmesh_language_sdk::SourceFile;
 use syntaxmesh_query::Query;
 
 #[path = "../../../../syntaxmesh-query/src/service/inference/tests/fixture.rs"]
 mod fixture;
+
+#[test]
+fn contract_history_is_invariant_under_opt_in_statechronicle_verification()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let durable_database = directory.path().join("contract-durable.sqlite");
+    let verified_database = directory.path().join("contract-verified.sqlite");
+    InferenceMaterializer::migrate(&durable_database)?;
+    InferenceMaterializer::migrate(&verified_database)?;
+    let repository = RepositoryId::derive(&[b"contract-verification-toggle-repo"]);
+    let worktree = WorktreeId::derive(&[b"contract-verification-toggle-worktree"]);
+    let generation = GenerationId::derive(&[b"contract-verification-toggle-generation"]);
+    let run_id = IndexRunId::derive(&[b"contract-verification-toggle-run"]);
+    let content = "fn writer() {}\nfn entry() { writer(); }\n";
+    let source = SourceFile {
+        file: FileVersion {
+            file_id: FileId::derive(&[b"src/lib.rs"]),
+            normalized_path: "src/lib.rs".to_owned(),
+            content_hash: *blake3::hash(content.as_bytes()).as_bytes(),
+            size_bytes: u64::try_from(content.len())?,
+        },
+        content: content.to_owned(),
+    };
+    let mut durable_engine = SyntaxMeshEngine::new(
+        syntaxmesh_store::InMemoryGraphStore::new(),
+        RustExtractor,
+        repository,
+        worktree,
+    );
+    durable_engine.index(std::slice::from_ref(&source), run_id, generation)?;
+    let durable_snapshot = durable_engine
+        .indexer
+        .store()
+        .historical_snapshot(generation)?;
+    let call = durable_snapshot
+        .edges
+        .iter()
+        .find(|edge| edge.relation == RelationKind::Calls)
+        .ok_or("missing indexed call evidence")?;
+    let contract = Contract {
+        id: "entry-calls-writer".to_owned(),
+        version: "1".to_owned(),
+        origin: ContractOrigin::Declared,
+        source: call.source,
+        target: call.target,
+        relation: RelationKind::Calls,
+        expectation: RelationExpectation::Required,
+    };
+    let mut verified_engine = SyntaxMeshEngine::new(
+        syntaxmesh_store::InMemoryGraphStore::new(),
+        RustExtractor,
+        repository,
+        worktree,
+    )
+    .with_statechronicle_verification();
+    verified_engine.index(std::slice::from_ref(&source), run_id, generation)?;
+    let verified_snapshot = verified_engine
+        .indexer
+        .store()
+        .historical_snapshot(generation)?;
+    if durable_snapshot != verified_snapshot {
+        return Err("verification toggle changed indexed graph facts".into());
+    }
+    let contracts = [contract];
+    let limits = ContractLimits {
+        contracts: 1,
+        input_bytes: 16_384,
+        edge_visits: 100,
+        results: 1,
+    };
+    let durable_request = ContractHistoryRequest {
+        generation,
+        contracts: &contracts,
+        limits: &limits,
+        history_scan_budget: 100,
+        output_bytes: 16_384,
+    };
+    let verified_request = ContractHistoryRequest {
+        generation,
+        ..durable_request
+    };
+    let durable_receipt =
+        durable_engine.retain_contract_history(&durable_database, &durable_request)?;
+    let verified_receipt =
+        verified_engine.retain_contract_history(&verified_database, &verified_request)?;
+    let durable_result = durable_engine.contract_result_at(
+        &durable_database,
+        repository,
+        worktree,
+        generation,
+        "entry-calls-writer",
+        "1",
+    )?;
+    let verified_result = verified_engine.contract_result_at(
+        &verified_database,
+        repository,
+        worktree,
+        generation,
+        "entry-calls-writer",
+        "1",
+    )?;
+    let durable_status = durable_engine
+        .into_store()
+        .current_generation(repository, worktree)?
+        .ok_or("missing durable generation")?
+        .status;
+    let verified_status = verified_engine
+        .into_store()
+        .current_generation(repository, worktree)?
+        .ok_or("missing verified generation")?
+        .status;
+    if durable_receipt.operation != verified_receipt.operation
+        || durable_result != verified_result
+        || durable_status != GenerationStatus::Durable
+        || verified_status != GenerationStatus::Verified
+    {
+        return Err(format!(
+            "StateChronicle toggle changed retained contract semantics: ops_equal={}, results_equal={}, durable_status={durable_status:?}, verified_status={verified_status:?}",
+            durable_receipt.operation == verified_receipt.operation,
+            durable_result == verified_result,
+        ).into());
+    }
+    Ok(())
+}
+
+#[test]
+fn engine_retains_contract_history_through_penelope_and_recovers_it()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let database = directory.path().join("engine-contract-history.sqlite");
+    InferenceMaterializer::migrate(&database)?;
+    let mut store = syntaxmesh_store::InMemoryGraphStore::new();
+    let (_rule, generation, _later) = fixture::fixture(&mut store)?;
+    let manifest = store.manifest(generation)?;
+    let contract = Contract {
+        id: "entry-calls-writer".to_owned(),
+        version: "1".to_owned(),
+        origin: ContractOrigin::Declared,
+        source: NodeId::derive(&[b"entry"]),
+        target: NodeId::derive(&[b"writer"]),
+        relation: RelationKind::Calls,
+        expectation: RelationExpectation::Required,
+    };
+    let contracts = [contract];
+    let limits = ContractLimits {
+        contracts: 1,
+        input_bytes: 16_384,
+        edge_visits: 100,
+        results: 1,
+    };
+    let request = ContractHistoryRequest {
+        generation,
+        contracts: &contracts,
+        limits: &limits,
+        history_scan_budget: 100,
+        output_bytes: 16_384,
+    };
+    let expected = Query::new(&store, generation).evaluate_contracts(&contracts, &limits, 100)?;
+    let mut engine =
+        SyntaxMeshEngine::new(store, RustExtractor, manifest.repository, manifest.worktree);
+    let receipt: ContractHistoryWatermark = engine.retain_contract_history(&database, &request)?;
+    let result = engine
+        .contract_result_at(
+            &database,
+            receipt.repository,
+            receipt.worktree,
+            generation,
+            "entry-calls-writer",
+            "1",
+        )?
+        .ok_or("engine did not retain its contract result")?;
+    let history = engine.contract_history(
+        &database,
+        &syntaxmesh_inference_sqlite::ContractHistoryQuery {
+            repository: receipt.repository,
+            worktree: receipt.worktree,
+            contract_id: "entry-calls-writer".to_owned(),
+            contract_version: "1".to_owned(),
+            after: None,
+            limit: 1,
+        },
+    )?;
+    if result.evaluation.generation != generation
+        || expected.first().map(|evaluation| evaluation.id) != Some(result.evaluation.id)
+        || history.items.first() != Some(&result)
+        || history.next_cursor.is_some()
+    {
+        return Err("engine materialization changed generation-pinned evaluation".into());
+    }
+    if engine.recover_inference()?.contract_history != 0 {
+        return Err("completed contract history was counted as pending recovery".into());
+    }
+    Ok(())
+}
 
 fn ontology_definition(rule: &Rule) -> OntologyDefinition {
     let source_concept = NodeId::derive(&[b"source-concept"]);
@@ -179,6 +381,7 @@ fn exercise<S: GraphStore + DurableRecordStore>(
     engine = SyntaxMeshEngine::new(open()?, RustExtractor, scope.repository, scope.worktree);
     if engine.recover_inference()?
         != (InferenceRecovery {
+            contract_history: 0,
             baselines: 1,
             setups: 1,
             stream_effects: 0,
@@ -221,6 +424,7 @@ fn exercise<S: GraphStore + DurableRecordStore>(
         || engine.initialize_inference_stream(database, &rebuild, 4096)? != origin
         || engine.recover_inference()?
             != (InferenceRecovery {
+                contract_history: 0,
                 baselines: 0,
                 setups: 0,
                 stream_effects: 0,

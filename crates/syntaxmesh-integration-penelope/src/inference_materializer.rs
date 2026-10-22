@@ -6,11 +6,13 @@ use syntaxmesh_inference_sqlite::{InferenceMaterializer, RebuildRequest, Waterma
 use syntaxmesh_store::{DurableRecordStore, GraphStore, StoreError};
 use syntaxmesh_workflow::WorkflowError;
 
+mod contract_history;
 mod journal;
 mod lifecycle;
 mod registered;
 mod setup;
 mod stream;
+pub use contract_history::ContractHistoryRequest;
 pub use lifecycle::PenelopeInferenceLifecycle;
 pub use registered::RegisteredInferenceAdmission;
 pub use setup::PenelopeInferenceSetup;
@@ -136,7 +138,10 @@ impl<S: GraphStore + DurableRecordStore> PenelopeInferenceMaterializer<S> {
     /// Rejects malformed records/pages or unavailable effects/source generations.
     pub fn recover_pending(&mut self) -> Result<usize, WorkflowError> {
         let mut cursor: Option<String> = None;
-        let mut recovered = self.recover_registered_pending()?;
+        let mut recovered = self.recover_contract_history_pending()?;
+        recovered = recovered
+            .checked_add(self.recover_registered_pending()?)
+            .ok_or_else(|| failure("inference recovery count overflow"))?;
         loop {
             let page = self
                 .store

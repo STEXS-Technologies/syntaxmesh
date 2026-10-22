@@ -40,6 +40,12 @@ const MIGRATIONS: &[Migration] = &[
         sql: include_str!("../migrations/0005_persistent_active_claim_roots.up.sql"),
         backfill: Some(crate::stream::tree::backfill),
     },
+    Migration {
+        version: 6,
+        name: "contract_result_history",
+        sql: include_str!("../migrations/0006_contract_result_history.up.sql"),
+        backfill: None,
+    },
 ];
 
 pub(crate) fn migrate(path: &Path) -> Result<()> {
@@ -138,6 +144,8 @@ fn validate_version(connection: &Connection, version: i64) -> Result<()> {
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests_contract_history;
 #[cfg(test)]
 mod tests_receipts;
 #[cfg(test)]

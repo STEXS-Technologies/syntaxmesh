@@ -63,7 +63,7 @@ fn explicit_v4_root_backfill_matches_old_roots_and_rolls_back_bad_counts_or_ledg
         })?
         .collect::<std::result::Result<Vec<_>, _>>()?;
     drop(statement);
-    materializer.connection.execute_batch("DROP TABLE inference_stream_roots; DROP TABLE inference_active_pages; DROP INDEX inference_stream_claim_closed_at; DELETE FROM inference_migrations WHERE version = 5; PRAGMA user_version = 4;")?;
+    materializer.connection.execute_batch("DROP INDEX inference_contract_evaluations_at; DROP INDEX inference_contract_evaluations_history; DROP TABLE inference_contract_evaluations; DROP TABLE inference_contract_evaluation_sets; DROP TABLE inference_stream_roots; DROP TABLE inference_active_pages; DROP INDEX inference_stream_claim_closed_at; DELETE FROM inference_migrations WHERE version >= 5; PRAGMA user_version = 4;")?;
     drop(materializer);
     if open(&path).is_ok() {
         return Err("ordinary open migrated v4 active roots".into());

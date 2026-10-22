@@ -43,6 +43,7 @@ pub(super) fn run(
     };
     let result = serde_json::json!({
         "version": 1,
+        "contract_history": recovered.contract_history,
         "baselines": recovered.baselines,
         "setups": recovered.setups,
         "stream_effects": recovered.stream_effects,

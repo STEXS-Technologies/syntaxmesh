@@ -129,6 +129,100 @@ fn prepare_and_catch_up<S: GraphStore>(
     if generations != [first, declared, retracted] {
         return Err("CLI catch-up did not retain ordered results for every successor".into());
     }
+    let history_command = if command.ends_with("-turso") {
+        "inference-contract-history-turso"
+    } else {
+        "inference-contract-history"
+    };
+    let first_page = invoke(&[
+        history_command,
+        text(canonical)?,
+        text(downstream)?,
+        "target-not-in-concept",
+        "1",
+        "2",
+    ])?;
+    if !first_page.status.success() {
+        return Err(String::from_utf8_lossy(&first_page.stderr)
+            .into_owned()
+            .into());
+    }
+    let first_page_json: serde_json::Value = serde_json::from_slice(&first_page.stdout)?;
+    let expected_first_items = serde_json::to_value(
+        history
+            .items
+            .get(..2)
+            .ok_or("retained history fixture has fewer than two results")?,
+    )?;
+    let next_cursor = first_page_json
+        .get("next_cursor")
+        .filter(|cursor| !cursor.is_null())
+        .ok_or("first contract-history page has no continuation cursor")?;
+    if first_page_json
+        .get("version")
+        .and_then(serde_json::Value::as_u64)
+        != Some(1)
+        || first_page_json
+            .get("temporal_claim")
+            .and_then(serde_json::Value::as_str)
+            != Some("retained_evaluation_generations_only")
+        || first_page_json
+            .get("items")
+            .and_then(serde_json::Value::as_array)
+            .map(Vec::len)
+            != Some(2)
+        || first_page_json.get("items") != Some(&expected_first_items)
+    {
+        return Err("contract-history CLI returned an invalid first page".into());
+    }
+    let cursor_file = canonical
+        .parent()
+        .ok_or("canonical fixture has no parent")?
+        .join(format!("contract-history-cursor-{command}.json"));
+    std::fs::write(&cursor_file, serde_json::to_vec(next_cursor)?)?;
+    let second_page = invoke(&[
+        history_command,
+        text(canonical)?,
+        text(downstream)?,
+        "target-not-in-concept",
+        "1",
+        "2",
+        text(&cursor_file)?,
+    ])?;
+    if !second_page.status.success() {
+        return Err(String::from_utf8_lossy(&second_page.stderr)
+            .into_owned()
+            .into());
+    }
+    let second_page_json: serde_json::Value = serde_json::from_slice(&second_page.stdout)?;
+    let expected_second_items = serde_json::to_value(
+        history
+            .items
+            .get(2..)
+            .ok_or("retained history fixture has no final result")?,
+    )?;
+    if second_page_json
+        .get("items")
+        .and_then(serde_json::Value::as_array)
+        .map(Vec::len)
+        != Some(1)
+        || second_page_json.get("next_cursor") != Some(&serde_json::Value::Null)
+        || second_page_json.get("items") != Some(&expected_second_items)
+    {
+        return Err("contract-history CLI did not return the final bounded page".into());
+    }
+    let mismatched_cursor = invoke(&[
+        history_command,
+        text(canonical)?,
+        text(downstream)?,
+        "different-contract",
+        "1",
+        "2",
+        text(&cursor_file)?,
+    ])?;
+    if mismatched_cursor.status.success() {
+        return Err("contract-history CLI accepted a cursor for another contract".into());
+    }
     let as_of_command = if command.ends_with("-turso") {
         "inference-result-as-of-turso"
     } else {

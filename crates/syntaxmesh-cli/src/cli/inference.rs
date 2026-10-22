@@ -13,6 +13,8 @@ mod outcome_as_of;
 pub(super) use outcome_as_of::outcome_as_of;
 mod outcome_timeline;
 pub(super) use outcome_timeline::outcome_timeline;
+mod contract_history;
+pub(super) use contract_history::contract_history;
 mod catch_up;
 pub(super) use catch_up::catch_up;
 mod sync;

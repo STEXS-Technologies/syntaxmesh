@@ -343,6 +343,14 @@ and inference CLI suites pass. Full `cargo make ci` passed in 154.00 seconds on
 2026-10-22 with DuckDB excluded. Complete v2 temporal drift lifecycle and broad
 v0–v5 acceptance remain open.
 
+[ADR-0390](adr/0390-cli-retained-contract-evaluation-history.md) exposes the
+already-indexed complete contract evaluation history as bounded, read-only
+File/Turso CLI pages. Output is scoped to the canonical store's repository and
+worktree, continuation cursors are contract-bound, and the temporal claim is
+limited to generations where evaluations were actually retained. This fills a
+CLI observability gap without graph replay, schema migration, or new runtime
+coupling; broader v2/v5 temporal reasoning and v0–v5 acceptance remain open.
+
 After this retrieval and target-discovery change, `cargo make ci` passed in
 184.40 seconds on 2026-10-22. It covered workspace formatting, architecture,
 extension isolation, migration registries, instrumented/default checks, audit

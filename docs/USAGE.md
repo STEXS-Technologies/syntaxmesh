@@ -935,6 +935,7 @@ syntaxmesh inference-retain-contracts /path/to/state/graph.snapshot /path/to/sta
 syntaxmesh inference-catch-up /path/to/state/graph.snapshot /path/to/state/inference.sqlite "$through_generation" 100 10000 1048576 100000 1048576
 syntaxmesh inference-result-as-of /path/to/state/graph.snapshot /path/to/state/inference.sqlite "$selected_generation" target-not-in-concept 1
 syntaxmesh inference-outcome-as-of /path/to/state/graph.snapshot /path/to/state/inference.sqlite "$selected_generation" target-not-in-concept 1
+syntaxmesh inference-contract-history /path/to/state/graph.snapshot /path/to/state/inference.sqlite target-not-in-concept 1 100
 ```
 
 Migration is explicit and respects writer ownership. Recovery runs existing
@@ -1007,6 +1008,14 @@ Pass the returned `next_cursor` JSON as `cursor.json` for the next page. This is
 the latest retained timeline, not a generation-pinned conformance answer; use
 `inference-outcome-as-of` when interpreting a selected generation. The output
 labels its temporal claim as observed evaluation generations only.
+
+`inference-contract-history[-turso]` returns bounded chronological pages of
+every retained evaluation for one contract ID/version. Pass `next_cursor` as a
+JSON cursor file to continue. This reads the downstream indexed history only;
+it does not replay canonical graph history, and results describe only
+generations that were evaluated and retained. Cursor files are capped at 16
+KiB. See
+[ADR-0390](docs/adr/0390-cli-retained-contract-evaluation-history.md).
 
 Configuration version 1 selects unregistered rule evaluation and remains
 backward-compatible. Version 2 selects ontology-registered inference and adds

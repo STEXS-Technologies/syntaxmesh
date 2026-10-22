@@ -1,14 +1,33 @@
 //! Thin generation-pinned access to the existing indexed lexical composer.
 
 use crate::{
-    DiscoveryPackingPreference, GenerationIdentifierIndex, LexicalPlanRequest, Query, QueryError,
-    SourceRolePackingRequest,
+    ContextSourceProvider, DiscoveryPackingPreference, GenerationIdentifierIndex,
+    LexicalPlanRequest, Query, QueryError, SourceRolePackingRequest, SourceSpanIndexLimits,
 };
 use std::collections::BTreeSet;
 use syntaxmesh_core::NodeId;
 use syntaxmesh_store::GraphStore;
 
 impl<S: GraphStore + ?Sized> Query<'_, S> {
+    /// Build an opt-in source-span-augmented planner index for this generation.
+    /// Source budgets are independent additional bounds, not RSS estimates.
+    ///
+    /// # Errors
+    /// Rejects stale/missing source, invalid spans, unavailable files, or any
+    /// exhausted node, posting, payload, span, or source-byte budget.
+    pub fn build_source_span_planner_index(
+        &self,
+        source: &impl ContextSourceProvider,
+        limits: SourceSpanIndexLimits,
+    ) -> Result<GenerationIdentifierIndex, QueryError> {
+        GenerationIdentifierIndex::build_source_span_planner(
+            self.store,
+            self.generation,
+            source,
+            limits,
+        )
+    }
+
     /// Order lexical seeds before discoveries only when explicitly requested.
     ///
     /// # Errors

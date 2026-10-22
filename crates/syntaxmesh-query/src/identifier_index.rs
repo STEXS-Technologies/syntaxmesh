@@ -10,6 +10,7 @@ mod source_content;
 pub use planner::{
     DiscoveryPackingPreference, LexicalPlanRequest, SourceRolePackingRequest, SourceRolePreference,
 };
+pub use source_content::SourceSpanIndexLimits;
 
 #[cfg(feature = "benchmark-instrumentation")]
 mod build_metrics;
@@ -27,6 +28,7 @@ pub struct GenerationIdentifierIndex {
     population: usize,
     postings: BTreeMap<String, Vec<NodeId>>,
     planner: Option<lexical::PlannerData>,
+    source_span_augmented: bool,
     #[cfg(feature = "benchmark-instrumentation")]
     build_metrics: IdentifierIndexBuildMetrics,
 }
@@ -104,6 +106,7 @@ impl GenerationIdentifierIndex {
             population: 0,
             postings: BTreeMap::new(),
             planner: planner.then(lexical::PlannerData::default),
+            source_span_augmented: false,
             #[cfg(feature = "benchmark-instrumentation")]
             build_metrics: IdentifierIndexBuildMetrics::default(),
         };

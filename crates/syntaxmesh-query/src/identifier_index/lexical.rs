@@ -1,7 +1,7 @@
 use super::{GenerationIdentifierIndex, charged_payload};
 use crate::{QueryError, RankedCandidate, identifier_terms};
 use std::collections::{BTreeMap, BTreeSet};
-use syntaxmesh_core::{GenerationId, Node, NodeId, NodeKind};
+use syntaxmesh_core::{FileId, GenerationId, Node, NodeId, NodeKind};
 use syntaxmesh_store::{GraphStore, StoreError};
 
 /// Token channel; stemming is identifier morphology, not semantic inference.
@@ -61,6 +61,7 @@ pub struct LexicalCandidateRequest<'query> {
 pub(super) struct PlannerData {
     pub(super) families: BTreeMap<NodeId, LexicalFamily>,
     pub(super) test_intent: BTreeSet<NodeId>,
+    pub(super) source_files: BTreeMap<NodeId, FileId>,
     stemmed: BTreeMap<String, Vec<NodeId>>,
 }
 
@@ -73,9 +74,44 @@ fn stem_terms(terms: &BTreeSet<String>) -> BTreeSet<String> {
 }
 
 impl PlannerData {
+    pub(super) fn insert_source_terms(
+        &mut self,
+        id: NodeId,
+        terms: &BTreeSet<String>,
+        count: &mut usize,
+        bytes: &mut usize,
+        posting_limit: usize,
+        payload_limit: usize,
+    ) -> Result<(), QueryError> {
+        if !self.families.contains_key(&id) {
+            return Err(QueryError::Context(
+                "source span candidate is absent from planner metadata".to_owned(),
+            ));
+        }
+        for term in stem_terms(terms) {
+            let postings = self.stemmed.entry(term.clone()).or_default();
+            match postings.binary_search(&id) {
+                Ok(_) => continue,
+                Err(position) => {
+                    if *count >= posting_limit {
+                        return Err(QueryError::Context(
+                            "source index posting budget exhausted".to_owned(),
+                        ));
+                    }
+                    let term_bytes = if postings.is_empty() { term.len() } else { 0 };
+                    *bytes = charged_payload(*bytes, term_bytes, payload_limit)?;
+                    postings.insert(position, id);
+                    *count = count.saturating_add(1);
+                }
+            }
+        }
+        Ok(())
+    }
+
     pub(super) fn remove_candidates(&mut self, excluded: &BTreeSet<NodeId>) {
         self.families.retain(|id, _| !excluded.contains(id));
         self.test_intent.retain(|id| !excluded.contains(id));
+        self.source_files.retain(|id, _| !excluded.contains(id));
         for postings in self.stemmed.values_mut() {
             postings.retain(|id| !excluded.contains(id));
         }

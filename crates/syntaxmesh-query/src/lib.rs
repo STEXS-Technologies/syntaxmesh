@@ -19,7 +19,7 @@ pub use identifier_index::IdentifierIndexBuildMetrics;
 pub use identifier_index::lexical::{LexicalCandidateRequest, LexicalChannel, LexicalFamily};
 pub use identifier_index::{
     DiscoveryPackingPreference, GenerationIdentifierIndex, LexicalPlanRequest,
-    SourceRolePackingRequest, SourceRolePreference,
+    SourceRolePackingRequest, SourceRolePreference, SourceSpanIndexLimits,
 };
 pub use identifier_normalization::{IDENTIFIER_NORMALIZATION_REVISION, identifier_terms};
 pub use ranked_candidates::{RankedCandidate, reference_ranked_candidates};

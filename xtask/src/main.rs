@@ -24,12 +24,13 @@ fn main() -> TaskResult<()> {
         "extension-fixture" => extension_fixture(&root),
         "turso-fts-probe" => turso_fts_probe(&root),
         "sqlite-migrations" => migrations(&root, MigrationBackend::Sqlite),
+        "inference-migrations" => inference_migrations(&root),
         "turso-migrations" => migrations(&root, MigrationBackend::Turso),
         "benchmark-file-writes" => write_bench::run(&root),
         "benchmark-context-retrieval" => context_bench::run(&root),
         "benchmark-repository-evidence" => repository_bench::run(&root),
         "fuzz-source-extractors" => fuzz_smoke::run(&root),
-        _ => Err(format!("usage: cargo run -p syntaxmesh-xtask -- <architecture|extension-fixture|turso-fts-probe|sqlite-migrations|turso-migrations|benchmark-context-retrieval|benchmark-repository-evidence|benchmark-file-writes|fuzz-source-extractors>; got {task:?}").into()),
+        _ => Err(format!("usage: cargo run -p syntaxmesh-xtask -- <architecture|extension-fixture|turso-fts-probe|sqlite-migrations|turso-migrations|inference-migrations|benchmark-context-retrieval|benchmark-repository-evidence|benchmark-file-writes|fuzz-source-extractors>; got {task:?}").into()),
     }
 }
 
@@ -104,12 +105,14 @@ fn architecture(root: &Path) -> TaskResult<()> {
         return Err("fuzz-only package leaked into the stable workspace".into());
     }
     let pure = [
+        "syntaxmesh-inference",
         "syntaxmesh-core",
         "syntaxmesh-api-model",
         "syntaxmesh-runtime-protocol",
         "syntaxmesh-resolver",
     ];
     let neutral = [
+        "syntaxmesh-inference",
         "syntaxmesh-core",
         "syntaxmesh-api-model",
         "syntaxmesh-runtime-protocol",
@@ -488,6 +491,44 @@ fn rust_files(root: &Path) -> TaskResult<Vec<PathBuf>> {
 enum MigrationBackend {
     Sqlite,
     Turso,
+}
+
+fn inference_migrations(root: &Path) -> TaskResult<()> {
+    let registry =
+        fs::read_to_string(root.join("crates/syntaxmesh-inference-sqlite/src/migrations.rs"))?;
+    let entries = regex::Regex::new(
+        r#"Migration\s*\{\s*version:\s*(\d+),\s*name:\s*"([^"]+)",\s*sql:\s*include_str!\(\s*"\.\./migrations/([^"/]+)"\s*\),\s*backfill:\s*(?:None|Some\(\s*[A-Za-z_][A-Za-z0-9_:]*\s*\)),?\s*\}"#,
+    )?;
+    let mut references = BTreeSet::new();
+    for (index, entry) in entries.captures_iter(&registry).enumerate() {
+        let version: usize = entry[1].parse()?;
+        let expected = index
+            .checked_add(1)
+            .ok_or("inference registry version overflow")?;
+        if version != expected
+            || entry[3] != format!("{version:04}_{}.up.sql", &entry[2])
+            || !references.insert(entry[3].to_owned())
+        {
+            return Err(
+                "inference migration registry is not contiguous or its SQL identity differs".into(),
+            );
+        }
+    }
+    let files = file_names(&sql_paths(
+        &root.join("crates/syntaxmesh-inference-sqlite/migrations"),
+        ".up.sql",
+    )?)?;
+    if references.is_empty() || references != files {
+        return Err(format!(
+            "inference migration registry/files differ: registry={references:?}, files={files:?}"
+        )
+        .into());
+    }
+    println!(
+        "Inference SQLite migration files match registry ({} SQL-backed)",
+        references.len()
+    );
+    Ok(())
 }
 
 fn migrations(root: &Path, backend: MigrationBackend) -> TaskResult<()> {

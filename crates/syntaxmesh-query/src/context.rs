@@ -20,6 +20,9 @@ mod source_cache;
 use graph::{ContextGraph, ReadMode};
 use ranking::{SourceGranularity, candidate_order};
 
+const MAX_EXCERPT_SCAN_BYTES: usize = 8 * 1024 * 1024;
+const MAX_EXCERPT_OUTPUT_BYTES: usize = 256 * 1024;
+
 #[derive(Clone, Copy)]
 pub(crate) enum SeedMode {
     LexicalAndExplicit,
@@ -337,9 +340,10 @@ fn compile<S: syntaxmesh_store::GraphStore + ?Sized>(
         .map(|record| (record.id, record.evidence_class))
         .collect::<BTreeMap<_, _>>();
     for (candidate, origin) in candidates.iter_mut().zip(origins) {
-        candidate.item.evidence_class = Some(*classes.get(&origin).ok_or_else(|| {
+        let evidence_class = *classes.get(&origin).ok_or_else(|| {
             QueryError::Context("context fact references missing provenance".to_owned())
-        })?);
+        })?;
+        candidate.item.evidence_class = Some(evidence_class);
     }
 
     candidates.sort_by(candidate_order);
@@ -368,13 +372,17 @@ fn compile<S: syntaxmesh_store::GraphStore + ?Sized>(
         });
     }
 
+    let mut excerpt_scan_bytes_remaining = MAX_EXCERPT_SCAN_BYTES;
+    let mut excerpt_output_bytes_remaining = MAX_EXCERPT_OUTPUT_BYTES;
     for candidate in &candidates {
         let trial = omitted.without(candidate.kind);
-        if packing::try_item(
+        if packing::try_candidate(
             &mut pack,
-            candidate.item.clone(),
+            candidate,
             trial.summary(),
             token_counter,
+            &mut excerpt_scan_bytes_remaining,
+            &mut excerpt_output_bytes_remaining,
         )? {
             omitted = trial;
         }
@@ -650,26 +658,27 @@ fn source_candidate(
         ));
         return None;
     };
+    let item = ContextItem {
+        rank: 0,
+        evidence_class: None,
+        kind: ContextItemKind::SourceEvidence,
+        text: format!(
+            "{}:{}-{}\n{}",
+            file.normalized_path, line_start, line_end, snippet
+        ),
+        node_ids: vec![node.id],
+        edge_ids: Vec::new(),
+        source_path: Some(file.normalized_path.clone()),
+        line_start: Some(line_start),
+        line_end: Some(line_end),
+    };
     Some(Candidate {
         kind: ContextItemKind::SourceEvidence,
         granularity: SourceGranularity::for_node(&node.kind),
         relevance,
         distance,
         key: format!("source:{}:{}", node.id.0.to_hex(), location.span.start_byte),
-        item: ContextItem {
-            rank: 0,
-            evidence_class: None,
-            kind: ContextItemKind::SourceEvidence,
-            text: format!(
-                "{}:{}-{}\n{}",
-                file.normalized_path, line_start, line_end, snippet
-            ),
-            node_ids: vec![node.id],
-            edge_ids: Vec::new(),
-            source_path: Some(file.normalized_path.clone()),
-            line_start: Some(line_start),
-            line_end: Some(line_end),
-        },
+        item,
     })
 }
 

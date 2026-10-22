@@ -8,6 +8,14 @@ pub struct IdentifierIndexBuildMetrics {
     pub node_scans: usize,
     pub nodes: usize,
     pub postings: usize,
+    /// Source-backed fact spans indexed by the opt-in source-text builder.
+    pub source_spans: usize,
+    /// Distinct source files verified and read by the opt-in source-text builder.
+    pub source_files: usize,
+    /// Full source bytes admitted for hash/span verification.
+    pub source_bytes: usize,
+    /// Additional source-content filtering, source-span scan/read and indexing time.
+    pub source_elapsed: Duration,
     /// Logical charged payload, not allocator memory or resident-set size.
     pub payload_bytes: usize,
     pub elapsed: Duration,

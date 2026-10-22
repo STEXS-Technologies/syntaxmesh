@@ -1,3 +1,5 @@
+#![allow(clippy::panic)]
+
 use syntaxmesh_api_model::{ContextItem, ContextItemKind};
 use syntaxmesh_core::{EdgeId, EvidenceClass, NodeId};
 
@@ -75,4 +77,39 @@ fn distinct_locations_text_and_non_source_items_remain_separate() {
     ];
     super::coalesce(&mut candidates);
     assert_eq!(candidates.len(), 7);
+}
+
+#[test]
+fn query_windows_are_bounded_term_relevant_and_source_located() {
+    let setup_line = "let unrelated_setup_value = 1234567890; ".repeat(4);
+    let mut lines = vec!["fn execute() {".to_owned()];
+    lines.extend((0..5).map(|_| setup_line.clone()));
+    lines.push("check_expected_version();".to_owned());
+    lines.extend((0..5).map(|_| setup_line.clone()));
+    lines.push("profile.apply_state_reducer();".to_owned());
+    lines.extend((0..5).map(|_| setup_line.clone()));
+    lines.push("}".to_owned());
+    let source = lines.join("\n");
+    let mut remaining = 256 * 1024;
+    let excerpts = super::query_windows(
+        &source,
+        40,
+        "expected_version StateProfile reducer",
+        &mut remaining,
+    );
+    assert_eq!(excerpts.len(), 4);
+    let Some((largest, largest_start, largest_end)) = excerpts.first() else {
+        panic!("expected largest relevant excerpt");
+    };
+    assert!(largest.contains("[…]"));
+    assert!(largest.contains("check_expected_version"));
+    assert!(largest.contains("profile.apply_state_reducer"));
+    assert_eq!((*largest_start, *largest_end), (41, 52));
+    let Some((smallest, smallest_start, smallest_end)) = excerpts.last() else {
+        panic!("expected one-line relevant excerpt");
+    };
+    assert!(smallest.contains("state_reducer"));
+    assert_eq!((*smallest_start, *smallest_end), (52, 52));
+    assert!(super::query_windows("one line only", 1, "one", &mut remaining).is_empty());
+    assert!(super::query_windows(&source, 1, "unmatched query terms", &mut remaining).is_empty());
 }

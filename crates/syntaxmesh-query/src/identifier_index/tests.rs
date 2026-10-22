@@ -7,6 +7,7 @@ use syntaxmesh_core::{
 use syntaxmesh_store::{GraphStore, InMemoryGraphStore};
 
 mod query_work;
+mod source_spans;
 
 #[test]
 fn source_content_filters_reserved_metadata_before_candidate_limits() -> Result<(), QueryError> {

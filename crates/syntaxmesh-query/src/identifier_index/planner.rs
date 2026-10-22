@@ -91,10 +91,48 @@ impl GenerationIdentifierIndex {
         generation: GenerationId,
         request: &LexicalPlanRequest<'_>,
     ) -> Result<Vec<NodeId>, QueryError> {
+        if self.source_span_augmented {
+            return self.source_content_seed_plan(store, generation, request, 32);
+        }
         let channels = self.family_channels(store, generation, request, None, 32)?;
         let mut plan = ordering::refill(&channels, 32);
         self.prioritize_primary(&mut plan)?;
         Ok(plan)
+    }
+
+    fn source_content_seed_plan<S: GraphStore + ?Sized>(
+        &self,
+        store: &S,
+        generation: GenerationId,
+        request: &LexicalPlanRequest<'_>,
+        limit: usize,
+    ) -> Result<Vec<NodeId>, QueryError> {
+        let scores = |channel, posting_budget| LexicalCandidateRequest {
+            query: request.query,
+            channel,
+            family: None,
+            eligible: None,
+            posting_budget,
+            limit,
+        };
+        let exact = self.lexical_channel_scores(
+            store,
+            generation,
+            &scores(LexicalChannel::Exact, request.posting_budget),
+        )?;
+        let stem_budget = request
+            .posting_budget
+            .checked_sub(exact.1)
+            .ok_or(QueryError::InvalidLimit)?;
+        let stemmed = self.lexical_channel_scores(
+            store,
+            generation,
+            &scores(LexicalChannel::Stemmed, stem_budget),
+        )?;
+        let data = self.planner.as_ref().ok_or(QueryError::InvalidLimit)?;
+        Ok(source_content_seed_selection(
+            &exact.0, &stemmed.0, data, limit,
+        ))
     }
 
     /// Order every selected ID, retaining zero-score discoveries and membership.
@@ -186,14 +224,45 @@ impl GenerationIdentifierIndex {
                 remaining = remaining.checked_sub(*visits).ok_or_else(|| {
                     QueryError::Context("lexical candidate posting budget exhausted".to_owned())
                 })?;
-                channels.push(
-                    ranked
-                        .iter()
-                        .filter(|entry| data.families.get(&entry.0) == Some(&family))
-                        .take(limit)
-                        .map(|entry| entry.0)
-                        .collect(),
-                );
+                let in_family =
+                    |entry: &&(NodeId, u64)| data.families.get(&entry.0) == Some(&family);
+                let mut channel = Vec::new();
+                if self.source_span_augmented {
+                    let mut seen_files = BTreeSet::new();
+                    let mut selected_nodes = BTreeSet::new();
+                    for (id, _) in ranked.iter().filter(in_family) {
+                        if let Some(file_id) = data.source_files.get(id)
+                            && !seen_files.insert(*file_id)
+                        {
+                            continue;
+                        }
+                        if selected_nodes.insert(*id) {
+                            channel.push(*id);
+                        }
+                        if channel.len() >= limit {
+                            break;
+                        }
+                    }
+                    if channel.len() < limit {
+                        for (id, _) in ranked.iter().filter(in_family) {
+                            if selected_nodes.insert(*id) {
+                                channel.push(*id);
+                            }
+                            if channel.len() >= limit {
+                                break;
+                            }
+                        }
+                    }
+                } else {
+                    channel.extend(
+                        ranked
+                            .iter()
+                            .filter(in_family)
+                            .take(limit)
+                            .map(|entry| entry.0),
+                    );
+                }
+                channels.push(channel);
             }
         }
         Ok(channels)
@@ -209,6 +278,65 @@ impl GenerationIdentifierIndex {
         });
         Ok(())
     }
+}
+
+fn source_content_seed_selection(
+    exact: &[(NodeId, u64)],
+    stemmed: &[(NodeId, u64)],
+    data: &super::lexical::PlannerData,
+    limit: usize,
+) -> Vec<NodeId> {
+    let mut scores = std::collections::BTreeMap::<NodeId, u64>::new();
+    for (id, score) in exact.iter().chain(stemmed) {
+        scores
+            .entry(*id)
+            .and_modify(|current| *current = (*current).max(*score))
+            .or_insert(*score);
+    }
+    let mut primary = Vec::new();
+    let mut secondary = Vec::new();
+    for (id, score) in scores {
+        match data.families.get(&id) {
+            Some(LexicalFamily::Code | LexicalFamily::Documentation) => {
+                primary.push((id, score));
+            }
+            Some(LexicalFamily::Reference | LexicalFamily::Other) => {
+                secondary.push((id, score));
+            }
+            None => {}
+        }
+    }
+    let rank = |left: &(NodeId, u64), right: &(NodeId, u64)| {
+        right.1.cmp(&left.1).then_with(|| left.0.cmp(&right.0))
+    };
+    primary.sort_by(rank);
+    secondary.sort_by(rank);
+
+    let diversity_limit = limit.div_ceil(2).min(limit);
+    let mut selected = Vec::with_capacity(limit.min(256));
+    let mut selected_ids = std::collections::BTreeSet::new();
+    let mut selected_files = std::collections::BTreeSet::new();
+    for (id, _) in &primary {
+        let new_file = data
+            .source_files
+            .get(id)
+            .is_none_or(|file_id| selected_files.insert(*file_id));
+        if new_file && selected_ids.insert(*id) {
+            selected.push(*id);
+        }
+        if selected.len() >= diversity_limit {
+            break;
+        }
+    }
+    for (id, _) in primary.iter().chain(&secondary) {
+        if selected.len() >= limit.min(256) {
+            break;
+        }
+        if selected_ids.insert(*id) {
+            selected.push(*id);
+        }
+    }
+    selected
 }
 
 #[cfg(test)]

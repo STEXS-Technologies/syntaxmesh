@@ -5,7 +5,7 @@ use crate::{
     GenerationIdentifierIndex, LexicalCandidateRequest, LexicalChannel, LexicalFamily, QueryError,
 };
 use std::collections::{BTreeSet, VecDeque};
-use syntaxmesh_core::{Node, NodeId};
+use syntaxmesh_core::{FileId, Node, NodeId};
 use syntaxmesh_store::GraphStore;
 
 #[test]
@@ -382,6 +382,163 @@ fn indexed_seed_and_complete_packing_plans_match_independent_corpus_oracle()
         assert_eq!(actual.iter().copied().collect::<BTreeSet<_>>(), selected);
     }
     Ok(())
+}
+
+#[test]
+fn source_span_seeds_prefer_distinct_files_without_expanding_the_seed_budget()
+-> Result<(), QueryError> {
+    let (mut store, mut delta) = super::super::tests::path_fixture()?;
+    let template = delta
+        .upsert_nodes
+        .first()
+        .cloned()
+        .ok_or(QueryError::InvalidLimit)?;
+    delta.expected_base = Some(delta.next_generation);
+    delta.next_generation = syntaxmesh_core::GenerationId::derive(&[b"file-diverse-seeds"]);
+    delta.remove_nodes = vec![template.id];
+    let mut ids = (0_u64..80)
+        .map(|ordinal| NodeId::derive(&[b"file-diverse-seed", &ordinal.to_le_bytes()]))
+        .collect::<Vec<_>>();
+    ids.sort_unstable();
+    let target = ids.pop().ok_or(QueryError::InvalidLimit)?;
+    delta.upsert_nodes = ids
+        .iter()
+        .chain(std::iter::once(&target))
+        .map(|id| Node {
+            id: *id,
+            kind: syntaxmesh_core::NodeKind::Function,
+            name: "checkpoint recovery".to_owned(),
+            ..template.clone()
+        })
+        .collect();
+    store.apply_delta(delta.clone())?;
+    let generation = delta.next_generation;
+    let mut index =
+        GenerationIdentifierIndex::build_for_planner(&store, generation, 80, 1000, 100_000)?;
+    let request = LexicalPlanRequest {
+        query: "checkpoint",
+        posting_budget: 1000,
+    };
+    let ordinary = index.lexical_seed_plan(&store, generation, &request)?;
+    if ordinary.contains(&target) || ordinary.len() != 32 {
+        return Err(QueryError::Context(
+            "fixture did not place the target beyond the ordinary seed cap".to_owned(),
+        ));
+    }
+    let crowded_file = FileId::derive(&[b"crowded-source-file"]);
+    let target_file = FileId::derive(&[b"target-source-file"]);
+    if let Some(planner) = &mut index.planner {
+        for id in &ids {
+            planner.source_files.insert(*id, crowded_file);
+        }
+        planner.source_files.insert(target, target_file);
+    } else {
+        return Err(QueryError::Context(
+            "planner metadata is unavailable".to_owned(),
+        ));
+    }
+    index.source_span_augmented = true;
+    let diverse = index.lexical_seed_plan(&store, generation, &request)?;
+    if diverse.len() != 32 || !diverse.contains(&target) {
+        return Err(QueryError::Context(
+            "file diversity did not admit the lower-ranked file leader".to_owned(),
+        ));
+    }
+    let limited_request = LexicalPlanRequest {
+        query: request.query,
+        posting_budget: 1,
+    };
+    assert!(
+        index
+            .lexical_seed_plan(&store, generation, &limited_request)
+            .is_err()
+    );
+    Ok(())
+}
+
+#[test]
+fn source_content_seed_scores_keep_ranked_candidates_beyond_channel_quota() -> Result<(), QueryError>
+{
+    let mut data = super::super::lexical::PlannerData::default();
+    let mut exact = Vec::new();
+    let mut target = None;
+    for rank in 0_u64..40 {
+        let id = NodeId::derive(&[b"source-score-rank", &rank.to_le_bytes()]);
+        data.families.insert(id, LexicalFamily::Code);
+        data.source_files.insert(
+            id,
+            FileId::derive(&[b"source-score-file", &rank.to_le_bytes()]),
+        );
+        exact.push((id, 100_u64.saturating_sub(rank)));
+        if rank == 23 {
+            target = Some(id);
+        }
+    }
+    let target = target.ok_or(QueryError::InvalidLimit)?;
+    let selected = super::source_content_seed_selection(&exact, &[], &data, 32);
+    assert_eq!(selected.len(), 32);
+    assert!(selected.contains(&target));
+    Ok(())
+}
+
+#[test]
+fn source_content_seed_scores_fuse_channels_and_defer_nonprimary_families() {
+    let mut data = super::super::lexical::PlannerData::default();
+    let code_stem_overlap = NodeId::derive(&[b"source-score-overlap"]);
+    let stronger_code = NodeId::derive(&[b"source-score-code"]);
+    let documentation = NodeId::derive(&[b"source-score-documentation"]);
+    let reference = NodeId::derive(&[b"source-score-reference"]);
+    for (id, family, name) in [
+        (
+            code_stem_overlap,
+            LexicalFamily::Code,
+            b"overlap".as_slice(),
+        ),
+        (stronger_code, LexicalFamily::Code, b"code".as_slice()),
+        (
+            documentation,
+            LexicalFamily::Documentation,
+            b"documentation".as_slice(),
+        ),
+        (reference, LexicalFamily::Reference, b"reference".as_slice()),
+    ] {
+        data.families.insert(id, family);
+        data.source_files.insert(id, FileId::derive(&[name]));
+    }
+    let exact = [
+        (code_stem_overlap, 100),
+        (stronger_code, 150),
+        (documentation, 140),
+    ];
+    let stemmed = [(code_stem_overlap, 100), (reference, 400)];
+    assert_eq!(
+        super::source_content_seed_selection(&exact, &stemmed, &data, 2),
+        [stronger_code, documentation]
+    );
+    assert_eq!(
+        super::source_content_seed_selection(&exact, &stemmed, &data, 3),
+        [stronger_code, documentation, code_stem_overlap]
+    );
+    assert_eq!(
+        super::source_content_seed_selection(&exact, &stemmed, &data, 4),
+        [stronger_code, documentation, code_stem_overlap, reference]
+    );
+}
+
+#[test]
+fn source_content_seed_diversity_treats_missing_provenance_as_singletons() {
+    let mut data = super::super::lexical::PlannerData::default();
+    let exact = (0_u64..3)
+        .map(|rank| {
+            let id = NodeId::derive(&[b"source-unlocated", &rank.to_le_bytes()]);
+            data.families.insert(id, LexicalFamily::Code);
+            (id, 100 - rank)
+        })
+        .collect::<Vec<_>>();
+    let selected = super::source_content_seed_selection(&exact, &[], &data, 2);
+    assert_eq!(selected.len(), 2);
+    assert_eq!(selected.first().copied(), exact.first().map(|item| item.0));
+    assert_eq!(selected.get(1).copied(), exact.get(1).map(|item| item.0));
 }
 
 #[test]

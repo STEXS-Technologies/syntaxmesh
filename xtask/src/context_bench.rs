@@ -50,9 +50,13 @@ pub(super) fn run(workspace: &Path) -> BenchResult<()> {
                 | "git@workstation:STEXS-Technologies/shardline.git"
                 | "https://github.com/STEXS-Technologies/shardline.git"
                 | "https://github.com/STEXS-Technologies/shardline"
+                | "git@github.com:STEXS-Technologies/penelope.git"
+                | "https://github.com/STEXS-Technologies/penelope.git"
+                | "git@github.com:STEXS-Technologies/statechronicle.git"
+                | "https://github.com/STEXS-Technologies/statechronicle.git"
         ) {
             return Err(
-                "external context benchmark currently supports only STEXS-Technologies/shardline"
+                "external context benchmark supports only approved STEXS Technologies repositories"
                     .into(),
             );
         }
@@ -207,6 +211,19 @@ pub(super) fn run(workspace: &Path) -> BenchResult<()> {
 
     let mut samples = Vec::with_capacity(iterations);
     let mut fixture_input_fingerprint = None;
+    let mut retrieval_quality_failed = false;
+    let expected_cases = evaluation_root.as_ref().map_or(3, |root| {
+        match root
+            .file_name()
+            .and_then(|name| name.to_str())
+            .map(str::to_ascii_lowercase)
+            .as_deref()
+        {
+            Some("shardline") => 7,
+            Some("penelope" | "statechronicle") => 3,
+            _ => 5,
+        }
+    });
     for iteration in 1..=iterations {
         let mut evaluation = Command::new("cargo");
         evaluation
@@ -229,7 +246,9 @@ pub(super) fn run(workspace: &Path) -> BenchResult<()> {
         );
         let results = parse_metrics(&combined)?;
         let fixture_inputs = parse_fixture_inputs(&combined)?;
-        if !output.status.success() {
+        let quality_failure = !output.status.success()
+            && completed_with_retrieval_misses(output.status.success(), &combined);
+        if !output.status.success() && !quality_failure {
             samples.push(json!({"iteration": iteration, "success": false, "fixture_inputs": fixture_inputs, "results": results}));
             write_json(&run_dir.join("samples.json"), &json!(samples))?;
             return exit_error(
@@ -260,17 +279,6 @@ pub(super) fn run(workspace: &Path) -> BenchResult<()> {
                 fixture_input_fingerprint = Some(fingerprint.to_owned());
             }
         }
-        let expected_cases = evaluation_root.as_ref().map_or(3, |root| {
-            match root
-                .file_name()
-                .and_then(|name| name.to_str())
-                .map(str::to_ascii_lowercase)
-                .as_deref()
-            {
-                Some("shardline") => 7,
-                _ => 5,
-            }
-        });
         validate_case_matrix(&results, expected_cases)?;
         write_json(
             &raw_dir.join(format!("iteration-{iteration}.json")),
@@ -279,10 +287,19 @@ pub(super) fn run(workspace: &Path) -> BenchResult<()> {
         samples.push(json!({
             "iteration": iteration,
             "success": output.status.success(),
+            "retrieval_quality_failed": quality_failure,
             "fixture_inputs": fixture_inputs,
             "results": results,
         }));
-        println!("completed context evaluation sample {iteration}/{iterations}");
+        retrieval_quality_failed |= quality_failure;
+        println!(
+            "completed context evaluation sample {iteration}/{iterations} (retrieval quality: {})",
+            if quality_failure {
+                "misses recorded"
+            } else {
+                "passed"
+            }
+        );
     }
 
     if let Some(fingerprint) = fixture_input_fingerprint {
@@ -299,7 +316,18 @@ pub(super) fn run(workspace: &Path) -> BenchResult<()> {
     let summary = render_summary(&metadata, &samples);
     fs::write(run_dir.join("summary.md"), summary)?;
     println!("context evaluation evidence: {}", run_dir.display());
+    if retrieval_quality_failed {
+        return Err(format!(
+            "retrieval quality missed required targets in one or more completed samples; all {iterations} runs were captured at {}",
+            run_dir.display()
+        )
+        .into());
+    }
     Ok(())
+}
+
+fn completed_with_retrieval_misses(exit_success: bool, output: &str) -> bool {
+    !exit_success && output.contains("required retrieval targets missed:")
 }
 
 fn parse_metrics(output: &str) -> BenchResult<Vec<Value>> {
@@ -685,6 +713,23 @@ mod tests {
         ];
         assert!(super::validate_case_matrix(&changed, 1).is_err());
     }
+
+    #[test]
+    fn completed_retrieval_misses_are_distinct_from_execution_failures() {
+        assert!(super::completed_with_retrieval_misses(
+            false,
+            "required retrieval targets missed: [\"target\"]"
+        ));
+        assert!(!super::completed_with_retrieval_misses(
+            false,
+            "database migration failed before evaluation"
+        ));
+        assert!(!super::completed_with_retrieval_misses(
+            true,
+            "required retrieval targets missed: [\"target\"]"
+        ));
+    }
+
     use super::{
         diagnostic_probes, logged_output, parse_fixture_inputs, parse_metrics, source_fingerprint,
     };

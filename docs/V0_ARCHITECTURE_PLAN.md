@@ -139,7 +139,20 @@ sequence without its retained generation fails as integrity corruption. No
 schema migration or serialized contract change was needed. Query, SQLite,
 Turso, and shared restart/backend conformance suites pass; the shared fixture
 also verifies pinned retirement remains correct on all four backends. This is
-an indexed lookup improvement, not semantic resolution or causal attribution.
+This is an indexed lookup improvement, not semantic resolution or causal attribution.
+
+[ADR-0375](adr/0375-bounded-ontology-version-compatibility.md) adds a bounded,
+directional comparison between registered ontology definitions. Additive
+concepts/relations and widened signatures are structurally compatible;
+removed concepts/relations, changed instance relations, and narrowed domains or
+ranges return deterministic incompatibility reasons. Empty constraints retain
+their documented unrestricted meaning. Version-only registries reject the
+comparison, and exact schema fingerprints still bind inference identity; this
+does not migrate facts or reuse claims across revisions. Boundary tests cover
+both comparison directions, additions, narrowing/removal, unrestricted
+signatures, unknown definitions and exhausted work budgets; targeted inference
+tests, strict Clippy and formatting pass. Durable ontology catalog history and
+semantic compatibility policy remain open.
 
 After this retrieval and target-discovery change, `cargo make ci` passed in
 184.40 seconds on 2026-10-22. It covered workspace formatting, architecture,

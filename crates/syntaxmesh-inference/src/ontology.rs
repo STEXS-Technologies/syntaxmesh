@@ -35,6 +35,25 @@ pub struct OntologyDefinition {
     pub relations: Vec<OntologyRelationDefinition>,
 }
 
+/// Result of comparing an older ontology definition with a newer revision.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum OntologyCompatibility {
+    /// The newer declaration preserves the older vocabulary and constraints.
+    BackwardCompatible,
+    /// The first deterministic schema change that narrows or removes meaning.
+    Incompatible(OntologyCompatibilityIssue),
+}
+
+/// A schema-level reason an ontology revision is not backward-compatible.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum OntologyCompatibilityIssue {
+    ConceptRemoved(NodeId),
+    RelationRemoved(String),
+    InstanceRelationChanged { from: String, to: String },
+    SubjectDomainNarrowed(String),
+    ObjectRangeNarrowed(String),
+}
+
 type RelationIdentity = (String, String);
 
 #[derive(Clone, Copy)]
@@ -311,6 +330,90 @@ impl OntologyRegistry {
             definitions: registered,
             fingerprints,
         })
+    }
+
+    /// Compare two registered definitions in the same namespace.
+    ///
+    /// Compatibility is directional: additions and widened relation
+    /// signatures are allowed, while removed vocabulary or narrowed
+    /// signatures are not. The work budget covers all definition entries
+    /// inspected before comparison begins.
+    ///
+    /// # Errors
+    /// Rejects empty identifiers, unknown definitions, version-only registries,
+    /// zero budgets, and comparisons whose bounded entry count exceeds the
+    /// supplied work budget.
+    pub fn compare_versions(
+        &self,
+        namespace: &str,
+        from_version: &str,
+        to_version: &str,
+        work_budget: usize,
+    ) -> Result<OntologyCompatibility, InferenceError> {
+        if namespace.trim().is_empty()
+            || from_version.trim().is_empty()
+            || to_version.trim().is_empty()
+            || work_budget == 0
+        {
+            return Err(InferenceError::InvalidInput);
+        }
+        let from = self
+            .definitions
+            .get(&(namespace.to_owned(), from_version.to_owned()))
+            .ok_or(InferenceError::InvalidInput)?;
+        let to = self
+            .definitions
+            .get(&(namespace.to_owned(), to_version.to_owned()))
+            .ok_or(InferenceError::InvalidInput)?;
+        let required_work = definition_entry_count(from)?
+            .checked_add(definition_entry_count(to)?)
+            .ok_or(InferenceError::BudgetExhausted)?;
+        if required_work > work_budget {
+            return Err(InferenceError::BudgetExhausted);
+        }
+
+        if from.instance_relation != to.instance_relation {
+            return Ok(OntologyCompatibility::Incompatible(
+                OntologyCompatibilityIssue::InstanceRelationChanged {
+                    from: from.instance_relation.clone(),
+                    to: to.instance_relation.clone(),
+                },
+            ));
+        }
+
+        let from_concepts = from.concepts.iter().copied().collect::<BTreeSet<_>>();
+        let to_concepts = to.concepts.iter().copied().collect::<BTreeSet<_>>();
+        if let Some(removed) = from_concepts.difference(&to_concepts).next() {
+            return Ok(OntologyCompatibility::Incompatible(
+                OntologyCompatibilityIssue::ConceptRemoved(*removed),
+            ));
+        }
+
+        let to_relations = to
+            .relations
+            .iter()
+            .map(|relation| (relation.name.as_str(), relation))
+            .collect::<BTreeMap<_, _>>();
+        let mut from_relations = from.relations.iter().collect::<Vec<_>>();
+        from_relations.sort_unstable_by(|left, right| left.name.cmp(&right.name));
+        for previous in from_relations {
+            let Some(next) = to_relations.get(previous.name.as_str()) else {
+                return Ok(OntologyCompatibility::Incompatible(
+                    OntologyCompatibilityIssue::RelationRemoved(previous.name.clone()),
+                ));
+            };
+            if !constraint_widens(&previous.subject_domain, &next.subject_domain) {
+                return Ok(OntologyCompatibility::Incompatible(
+                    OntologyCompatibilityIssue::SubjectDomainNarrowed(previous.name.clone()),
+                ));
+            }
+            if !constraint_widens(&previous.object_range, &next.object_range) {
+                return Ok(OntologyCompatibility::Incompatible(
+                    OntologyCompatibilityIssue::ObjectRangeNarrowed(previous.name.clone()),
+                ));
+            }
+        }
+        Ok(OntologyCompatibility::BackwardCompatible)
     }
 
     fn admit_entries(
@@ -757,6 +860,37 @@ impl OntologyRegistry {
             .ok_or(InferenceError::InvalidInput)?;
         Ok(Some((definition, declared)))
     }
+}
+
+fn definition_entry_count(definition: &OntologyDefinition) -> Result<usize, InferenceError> {
+    definition
+        .concepts
+        .len()
+        .checked_add(
+            definition
+                .relations
+                .iter()
+                .try_fold(0_usize, |total, relation| {
+                    total
+                        .checked_add(1)
+                        .and_then(|value| value.checked_add(relation.subject_domain.len()))
+                        .and_then(|value| value.checked_add(relation.object_range.len()))
+                        .ok_or(InferenceError::BudgetExhausted)
+                })?,
+        )
+        .ok_or(InferenceError::BudgetExhausted)
+}
+
+fn constraint_widens(previous: &[NodeId], next: &[NodeId]) -> bool {
+    if previous.is_empty() {
+        return next.is_empty();
+    }
+    if next.is_empty() {
+        return true;
+    }
+    let previous = previous.iter().copied().collect::<BTreeSet<_>>();
+    let next = next.iter().copied().collect::<BTreeSet<_>>();
+    previous.is_subset(&next)
 }
 
 /// Evaluate only rules whose explicit ontology versions are registered.

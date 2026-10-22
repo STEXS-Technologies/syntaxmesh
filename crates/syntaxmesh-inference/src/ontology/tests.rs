@@ -9,6 +9,162 @@ fn relation(name: &str, object_range: Vec<NodeId>) -> OntologyRelationDefinition
     }
 }
 
+fn versioned_definition(
+    version: &str,
+    concepts: Vec<NodeId>,
+    instance_relation: &str,
+    mut relations: Vec<OntologyRelationDefinition>,
+) -> OntologyDefinition {
+    relations.push(OntologyRelationDefinition {
+        name: instance_relation.to_owned(),
+        subject_domain: Vec::new(),
+        object_range: concepts.clone(),
+    });
+    OntologyDefinition {
+        schema_version: ONTOLOGY_DEFINITION_SCHEMA_VERSION,
+        namespace: "example".to_owned(),
+        version: version.to_owned(),
+        concepts,
+        instance_relation: instance_relation.to_owned(),
+        relations,
+    }
+}
+
+#[test]
+fn ontology_version_comparison_is_directional_bounded_and_structural() -> Result<(), InferenceError>
+{
+    let alpha = NodeId::derive(&[b"compat-alpha"]);
+    let beta = NodeId::derive(&[b"compat-beta"]);
+    let gamma = NodeId::derive(&[b"compat-gamma"]);
+    let old = versioned_definition(
+        "1",
+        vec![alpha, beta],
+        "instance_of",
+        vec![OntologyRelationDefinition {
+            name: "uses".to_owned(),
+            subject_domain: vec![alpha],
+            object_range: vec![beta],
+        }],
+    );
+    let compatible = versioned_definition(
+        "2",
+        vec![alpha, beta, gamma],
+        "instance_of",
+        vec![
+            OntologyRelationDefinition {
+                name: "uses".to_owned(),
+                subject_domain: vec![alpha, gamma],
+                object_range: vec![beta, gamma],
+            },
+            relation("added_relation", vec![gamma]),
+        ],
+    );
+    let mut narrowed = compatible.clone();
+    narrowed.version = "3".to_owned();
+    narrowed
+        .relations
+        .iter_mut()
+        .find(|item| item.name == "uses")
+        .ok_or(InferenceError::InvalidInput)?
+        .subject_domain = vec![alpha];
+    let mut narrowed_range = compatible.clone();
+    narrowed_range.version = "8".to_owned();
+    narrowed_range
+        .relations
+        .iter_mut()
+        .find(|item| item.name == "uses")
+        .ok_or(InferenceError::InvalidInput)?
+        .object_range = vec![beta];
+    let widened_unrestricted = versioned_definition(
+        "7",
+        vec![alpha, beta],
+        "instance_of",
+        vec![OntologyRelationDefinition {
+            name: "uses".to_owned(),
+            subject_domain: Vec::new(),
+            object_range: Vec::new(),
+        }],
+    );
+    let mut removed_concept = old.clone();
+    removed_concept.version = "4".to_owned();
+    removed_concept.concepts = vec![alpha];
+    removed_concept
+        .relations
+        .iter_mut()
+        .find(|item| item.name == "instance_of")
+        .ok_or(InferenceError::InvalidInput)?
+        .object_range = vec![alpha];
+    removed_concept
+        .relations
+        .iter_mut()
+        .find(|item| item.name == "uses")
+        .ok_or(InferenceError::InvalidInput)?
+        .object_range = Vec::new();
+    let removed_relation = versioned_definition("5", vec![alpha, beta], "instance_of", vec![]);
+    let changed_instance = versioned_definition(
+        "6",
+        vec![alpha, beta],
+        "type_of",
+        vec![relation("instance_of", vec![alpha, beta])],
+    );
+    let definitions = vec![
+        old.clone(),
+        compatible.clone(),
+        narrowed,
+        narrowed_range,
+        removed_concept,
+        removed_relation,
+        changed_instance,
+        widened_unrestricted,
+    ];
+    let bytes =
+        serde_json::to_vec(&definitions).map_err(|_encoding| InferenceError::IdentityEncoding)?;
+    let registry = OntologyRegistry::from_definitions(&definitions, 128, bytes.len())?;
+    let work = definition_entry_count(&old)? + definition_entry_count(&compatible)?;
+    if registry.compare_versions("example", "1", "2", work)
+        != Ok(OntologyCompatibility::BackwardCompatible)
+        || registry.compare_versions("example", "2", "1", work)
+            != Ok(OntologyCompatibility::Incompatible(
+                OntologyCompatibilityIssue::ConceptRemoved(gamma),
+            ))
+        || registry.compare_versions("example", "2", "3", 64)
+            != Ok(OntologyCompatibility::Incompatible(
+                OntologyCompatibilityIssue::SubjectDomainNarrowed("uses".to_owned()),
+            ))
+        || registry.compare_versions("example", "2", "8", 64)
+            != Ok(OntologyCompatibility::Incompatible(
+                OntologyCompatibilityIssue::ObjectRangeNarrowed("uses".to_owned()),
+            ))
+        || registry.compare_versions("example", "1", "7", 64)
+            != Ok(OntologyCompatibility::BackwardCompatible)
+        || registry.compare_versions("example", "1", "4", 64)
+            != Ok(OntologyCompatibility::Incompatible(
+                OntologyCompatibilityIssue::ConceptRemoved(beta),
+            ))
+        || registry.compare_versions("example", "1", "5", 64)
+            != Ok(OntologyCompatibility::Incompatible(
+                OntologyCompatibilityIssue::RelationRemoved("uses".to_owned()),
+            ))
+        || registry.compare_versions("example", "1", "6", 64)
+            != Ok(OntologyCompatibility::Incompatible(
+                OntologyCompatibilityIssue::InstanceRelationChanged {
+                    from: "instance_of".to_owned(),
+                    to: "type_of".to_owned(),
+                },
+            ))
+        || registry.compare_versions("example", "1", "2", work - 1)
+            != Err(InferenceError::BudgetExhausted)
+        || registry.compare_versions("example", "1", "missing", 64)
+            != Err(InferenceError::InvalidInput)
+        || OntologyRegistry::new(&[("example".to_owned(), "1".to_owned())], 1, 128)?
+            .compare_versions("example", "1", "1", 64)
+            != Err(InferenceError::InvalidInput)
+    {
+        return Err(InferenceError::InvalidInput);
+    }
+    Ok(())
+}
+
 #[test]
 fn registry_rejects_unknown_versions_duplicates_and_exhausted_bounds() -> Result<(), InferenceError>
 {

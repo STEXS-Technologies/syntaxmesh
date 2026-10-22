@@ -18,8 +18,9 @@ pub use model::{
     Limits, Premise, PremiseClosure, RegisteredDiscoveryBudgets, Rule, Selection,
 };
 pub use ontology::{
-    BoundRuleSet, ONTOLOGY_DEFINITION_SCHEMA_VERSION, OntologyDefinition, OntologyRegistry,
-    OntologyRelationDefinition, RegisteredInferenceAdmission, evaluate_registered,
+    BoundRuleSet, ONTOLOGY_DEFINITION_SCHEMA_VERSION, OntologyCompatibility,
+    OntologyCompatibilityIssue, OntologyDefinition, OntologyRegistry, OntologyRelationDefinition,
+    RegisteredInferenceAdmission, evaluate_registered,
 };
 pub use operation_identity::materialization_identity;
 pub use rule_set::{evaluate_rules, rule_set_identity};

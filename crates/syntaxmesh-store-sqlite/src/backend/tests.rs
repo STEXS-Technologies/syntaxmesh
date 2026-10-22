@@ -1962,6 +1962,18 @@ fn fact_version_generation_change_uses_start_and_end_indexes() -> Result<(), Sto
             .collect::<Result<Vec<_>, _>>()
             .map_err(sql_error)?
     };
+    let validity_plan = {
+        let mut statement = store.connection.prepare(
+            "EXPLAIN QUERY PLAN SELECT versions.valid_until_sequence, end_entry.payload FROM syntaxmesh_fact_versions AS versions JOIN syntaxmesh_generation_history AS start_entry ON start_entry.generation = ?3 LEFT JOIN syntaxmesh_generation_history AS end_entry ON end_entry.sequence = versions.valid_until_sequence WHERE versions.fact_kind = ?1 AND versions.fact_id = ?2 AND versions.valid_from_sequence = start_entry.sequence",
+        ).map_err(sql_error)?;
+        statement
+            .query_map(params![NODE_FACT, vec![1_u8; 32], vec![2_u8; 32]], |row| {
+                row.get::<_, String>(3)
+            })
+            .map_err(sql_error)?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(sql_error)?
+    };
     let generation_plan = {
         let mut statement = store
             .connection
@@ -1990,10 +2002,17 @@ fn fact_version_generation_change_uses_start_and_end_indexes() -> Result<(), Sto
         || !generation_plan
             .join("; ")
             .contains("syntaxmesh_fact_versions_end_generation_idx")
+        || (!validity_plan
+            .join("; ")
+            .contains("syntaxmesh_fact_versions_identity_time_idx")
+            && !validity_plan
+                .join("; ")
+                .contains("sqlite_autoindex_syntaxmesh_fact_versions_1"))
     {
         return Err(StoreError::Integrity(format!(
-            "fact-version generation change does not use identity indexes and generation-page indexes: {plan}; {}",
-            generation_plan.join("; ")
+            "fact-version generation change or exact validity does not use identity indexes and generation-page indexes: {plan}; {}; {}",
+            generation_plan.join("; "),
+            validity_plan.join("; ")
         )));
     }
     Ok(())

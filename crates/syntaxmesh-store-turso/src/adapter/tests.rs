@@ -572,6 +572,24 @@ fn fact_version_generation_change_uses_start_and_end_indexes() -> Result<(), Tur
         }
         Ok::<_, TursoStoreError>(details.join("; "))
     })?;
+    let validity_plan = store.runtime.block_on(async {
+        let mut rows = store
+            .connection
+            .query(
+                "EXPLAIN QUERY PLAN SELECT versions.valid_until_sequence, end_entry.payload FROM syntaxmesh_fact_versions AS versions JOIN syntaxmesh_generation_history AS start_entry ON start_entry.generation = ?3 LEFT JOIN syntaxmesh_generation_history AS end_entry ON end_entry.sequence = versions.valid_until_sequence WHERE versions.fact_kind = ?1 AND versions.fact_id = ?2 AND versions.valid_from_sequence = start_entry.sequence",
+                (NODE_FACT, vec![1_u8; 32], vec![2_u8; 32]),
+            )
+            .await
+            .map_err(|error| TursoStoreError::Backend(format!("explain exact fact-version validity: {error}")))?;
+        let mut details = Vec::new();
+        while let Some(row) = rows.next().await.map_err(|error| TursoStoreError::Backend(format!("read exact fact-version validity plan: {error}")))? {
+            match row.get_value(3).map_err(|error| TursoStoreError::Backend(format!("decode exact fact-version validity plan: {error}")))? {
+                turso::Value::Text(detail) => details.push(detail),
+                other @ (turso::Value::Null | turso::Value::Integer(_) | turso::Value::Real(_) | turso::Value::Blob(_)) => return Err(TursoStoreError::Snapshot(format!("fact-version validity plan detail is not text: {other:?}"))),
+            }
+        }
+        Ok::<_, TursoStoreError>(details.join("; "))
+    })?;
     drop(store);
     drop(std::fs::remove_file(&path));
     if (!plan.contains("syntaxmesh_fact_versions_identity_time_idx")
@@ -579,9 +597,11 @@ fn fact_version_generation_change_uses_start_and_end_indexes() -> Result<(), Tur
         || !plan.contains("syntaxmesh_fact_versions_identity_end_idx")
         || !generation_plan.contains("syntaxmesh_fact_versions_start_generation_idx")
         || !generation_plan.contains("syntaxmesh_fact_versions_end_generation_idx")
+        || (!validity_plan.contains("syntaxmesh_fact_versions_identity_time_idx")
+            && !validity_plan.contains("sqlite_autoindex_syntaxmesh_fact_versions_1"))
     {
         return Err(TursoStoreError::Snapshot(format!(
-            "fact-version generation change does not use the identity and generation indexes: {plan}; {generation_plan}"
+            "fact-version generation change or exact validity does not use the identity and generation indexes: {plan}; {generation_plan}; {validity_plan}"
         )));
     }
     Ok(())

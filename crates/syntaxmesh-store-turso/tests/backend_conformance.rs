@@ -901,6 +901,8 @@ struct FactLineageScenario {
     lineage: Vec<TemporalRecord>,
     events: Vec<TemporalRecord>,
     correlations: Vec<TemporalRecord>,
+    introductions: Vec<Option<TemporalRecord>>,
+    retirements: Vec<Option<TemporalRecord>>,
 }
 
 #[test]
@@ -918,6 +920,8 @@ fn fact_lineage_uses_retained_fact_versions_across_backends_and_restart() -> Res
         lineage: expected,
         events: expected_events,
         correlations: expected_correlations,
+        introductions: expected_introductions,
+        retirements: expected_retirements,
     } = publish_fact_lineage(&mut memory)?;
     assert_single_supersedes(&expected)?;
 
@@ -927,6 +931,8 @@ fn fact_lineage_uses_retained_fact_versions_across_backends_and_restart() -> Res
         lineage: file_lineage,
         events: file_events,
         correlations: file_correlations,
+        introductions: file_introductions,
+        retirements: file_retirements,
     } = publish_fact_lineage(&mut file)?;
     drop(file);
     let reopened_file = FileGraphStore::open(&file_path)?;
@@ -945,6 +951,8 @@ fn fact_lineage_uses_retained_fact_versions_across_backends_and_restart() -> Res
     )
     .change_event_correlations(node_fact_ref(), None, 10)
     .map_err(|error| StoreError::Backend(error.to_string()))?;
+    let file_introduction_restart = fact_version_introductions(&reopened_file, file_generation)?;
+    let file_retirement_restart = fact_version_retirements(&reopened_file, file_generation)?;
 
     let mut turso = open_turso(&turso_path)?;
     let FactLineageScenario {
@@ -952,6 +960,8 @@ fn fact_lineage_uses_retained_fact_versions_across_backends_and_restart() -> Res
         lineage: turso_lineage,
         events: turso_events,
         correlations: turso_correlations,
+        introductions: turso_introductions,
+        retirements: turso_retirements,
     } = publish_fact_lineage(&mut turso)?;
     drop(turso);
     let reopened_turso = open_turso(&turso_path)?;
@@ -970,6 +980,8 @@ fn fact_lineage_uses_retained_fact_versions_across_backends_and_restart() -> Res
     )
     .change_event_correlations(node_fact_ref(), None, 10)
     .map_err(|error| StoreError::Backend(error.to_string()))?;
+    let turso_introduction_restart = fact_version_introductions(&reopened_turso, turso_generation)?;
+    let turso_retirement_restart = fact_version_retirements(&reopened_turso, turso_generation)?;
 
     let mut sqlite = open_migrated(&sqlite_path)?;
     let FactLineageScenario {
@@ -977,6 +989,8 @@ fn fact_lineage_uses_retained_fact_versions_across_backends_and_restart() -> Res
         lineage: sqlite_lineage,
         events: sqlite_events,
         correlations: sqlite_correlations,
+        introductions: sqlite_introductions,
+        retirements: sqlite_retirements,
     } = publish_fact_lineage(&mut sqlite)?;
     drop(sqlite);
     let reopened_sqlite = open_migrated(&sqlite_path)?;
@@ -995,6 +1009,9 @@ fn fact_lineage_uses_retained_fact_versions_across_backends_and_restart() -> Res
     )
     .change_event_correlations(node_fact_ref(), None, 10)
     .map_err(|error| StoreError::Backend(error.to_string()))?;
+    let sqlite_introduction_restart =
+        fact_version_introductions(&reopened_sqlite, sqlite_generation)?;
+    let sqlite_retirement_restart = fact_version_retirements(&reopened_sqlite, sqlite_generation)?;
 
     drop(reopened_file);
     drop(reopened_turso);
@@ -1027,6 +1044,12 @@ fn fact_lineage_uses_retained_fact_versions_across_backends_and_restart() -> Res
         || expected_correlations != file_correlations
         || expected_correlations != turso_correlations
         || expected_correlations != sqlite_correlations
+        || expected_introductions != file_introductions
+        || expected_introductions != turso_introductions
+        || expected_introductions != sqlite_introductions
+        || expected_retirements != file_retirements
+        || expected_retirements != turso_retirements
+        || expected_retirements != sqlite_retirements
         || file_event_restart != expected_events_page
         || turso_event_restart != expected_events_page
         || sqlite_event_restart != expected_events_page
@@ -1036,6 +1059,12 @@ fn fact_lineage_uses_retained_fact_versions_across_backends_and_restart() -> Res
         || file_correlation_restart != expected_correlations
         || turso_correlation_restart != expected_correlations
         || sqlite_correlation_restart != expected_correlations
+        || file_introduction_restart != expected_introductions
+        || turso_introduction_restart != expected_introductions
+        || sqlite_introduction_restart != expected_introductions
+        || file_retirement_restart != expected_retirements
+        || turso_retirement_restart != expected_retirements
+        || sqlite_retirement_restart != expected_retirements
     {
         return Err(StoreError::Integrity(
             "fact-version lineage differs across stores or restart".to_owned(),
@@ -1103,6 +1132,27 @@ fn publish_fact_lineage<S: GraphStore>(store: &mut S) -> Result<FactLineageScena
         AcceptanceTime(20),
     )?;
     let no_op_generation = GenerationId::derive(&[b"lineage-generation-no-op"]);
+    let retired_validity = store.fact_version_validity(FactVersionRef {
+        fact: node_fact_ref(),
+        valid_from: first_generation,
+    })?;
+    let active_validity = store.fact_version_validity(FactVersionRef {
+        fact: node_fact_ref(),
+        valid_from: updated_generation,
+    })?;
+    let unknown_validity = store.fact_version_validity(FactVersionRef {
+        fact: node_fact_ref(),
+        valid_from: no_op_generation,
+    })?;
+    if retired_validity.is_none_or(|interval| interval.valid_until != Some(updated_generation))
+        || active_validity.is_none_or(|interval| interval.valid_until.is_some())
+        || unknown_validity.is_some()
+    {
+        return Err(StoreError::Integrity(
+            "exact fact-version validity did not distinguish closed, active and unknown versions"
+                .to_owned(),
+        ));
+    }
     store.apply_delta_at(
         GraphDelta {
             repository,
@@ -1150,6 +1200,8 @@ fn publish_fact_lineage<S: GraphStore>(store: &mut S) -> Result<FactLineageScena
         | TemporalRecord::FactVersion { .. }
         | TemporalRecord::FactSupersedes { .. }
         | TemporalRecord::ChangeEvent { .. }
+        | TemporalRecord::FactVersionIntroduction { .. }
+        | TemporalRecord::FactVersionRetirement { .. }
         | TemporalRecord::ChangeEventCorrelation { .. }
         | TemporalRecord::ChangeEventCorrelationFooter { .. }
         | TemporalRecord::ChangeSetEvent { .. }
@@ -1172,6 +1224,43 @@ fn publish_fact_lineage<S: GraphStore>(store: &mut S) -> Result<FactLineageScena
     let correlations = Query::new(store, first_generation)
         .change_event_correlations(node_fact_ref(), None, 10)
         .map_err(|error| StoreError::Backend(error.to_string()))?;
+    let introductions = fact_version_introductions(store, updated_generation)?;
+    let retirements = fact_version_retirements(store, updated_generation)?;
+    if Query::new(store, first_generation)
+        .fact_version_introduction(FactVersionRef {
+            fact: node_fact_ref(),
+            valid_from: updated_generation,
+        })
+        .map_err(|error| StoreError::Backend(error.to_string()))?
+        .is_some()
+    {
+        return Err(StoreError::Integrity(
+            "future fact-version introduction leaked into an earlier snapshot".to_owned(),
+        ));
+    }
+    if Query::new(store, first_generation)
+        .fact_version_retirement(FactVersionRef {
+            fact: node_fact_ref(),
+            valid_from: first_generation,
+        })
+        .map_err(|error| StoreError::Backend(error.to_string()))?
+        .is_some()
+        || !matches!(
+            retirements.first(),
+            Some(Some(TemporalRecord::FactVersionRetirement { version, event, .. }))
+                if version.fact == node_fact_ref()
+                    && version.valid_from == first_generation
+                    && event.generation_after == updated_generation
+                    && event.changed_facts.iter().any(|changed| changed.fact == node_fact_ref()
+                        && changed.kind == syntaxmesh_core::FactChangeKind::Updated)
+        )
+        || retirements.get(1).is_none_or(Option::is_some)
+        || retirements.get(2).is_none_or(Option::is_some)
+    {
+        return Err(StoreError::Integrity(
+            "fact-version retirement was absent, premature, or misclassified".to_owned(),
+        ));
+    }
     let source_event = store
         .change_event(first_generation)?
         .ok_or_else(|| StoreError::Integrity("source change event is missing".to_owned()))?;
@@ -1213,7 +1302,53 @@ fn publish_fact_lineage<S: GraphStore>(store: &mut S) -> Result<FactLineageScena
         lineage,
         events,
         correlations,
+        introductions,
+        retirements,
     })
+}
+
+fn fact_version_introductions<S: GraphStore + ?Sized>(
+    store: &S,
+    generation: GenerationId,
+) -> Result<Vec<Option<TemporalRecord>>, StoreError> {
+    let query = Query::new(store, generation);
+    [
+        GenerationId::derive(&[b"lineage-generation-one"]),
+        GenerationId::derive(&[b"lineage-generation-two"]),
+        GenerationId::derive(&[b"lineage-generation-no-op"]),
+    ]
+    .into_iter()
+    .map(|valid_from| {
+        query
+            .fact_version_introduction(FactVersionRef {
+                fact: node_fact_ref(),
+                valid_from,
+            })
+            .map_err(|error| StoreError::Backend(error.to_string()))
+    })
+    .collect()
+}
+
+fn fact_version_retirements<S: GraphStore + ?Sized>(
+    store: &S,
+    generation: GenerationId,
+) -> Result<Vec<Option<TemporalRecord>>, StoreError> {
+    let query = Query::new(store, generation);
+    [
+        GenerationId::derive(&[b"lineage-generation-one"]),
+        GenerationId::derive(&[b"lineage-generation-two"]),
+        GenerationId::derive(&[b"lineage-generation-no-op"]),
+    ]
+    .into_iter()
+    .map(|valid_from| {
+        query
+            .fact_version_retirement(FactVersionRef {
+                fact: node_fact_ref(),
+                valid_from,
+            })
+            .map_err(|error| StoreError::Backend(error.to_string()))
+    })
+    .collect()
 }
 
 fn node_fact_ref() -> FactRef {

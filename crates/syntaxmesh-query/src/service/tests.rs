@@ -8,6 +8,7 @@ use syntaxmesh_core::{
 use syntaxmesh_store::InMemoryGraphStore;
 
 mod fact_history_pages;
+mod fact_version_introduction;
 
 #[test]
 fn consequence_trace_preserves_delayed_chronology_and_exclusive_retractions()
@@ -1069,6 +1070,8 @@ fn searches_and_traverses_one_generation() -> Result<(), QueryError> {
         | TemporalRecord::FactVersion { .. }
         | TemporalRecord::FactSupersedes { .. }
         | TemporalRecord::ChangeEvent { .. }
+        | TemporalRecord::FactVersionIntroduction { .. }
+        | TemporalRecord::FactVersionRetirement { .. }
         | TemporalRecord::ChangeEventFooter { .. }
         | TemporalRecord::ChangeEventCorrelation { .. }
         | TemporalRecord::ChangeEventCorrelationFooter { .. }

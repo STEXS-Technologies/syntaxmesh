@@ -1,10 +1,547 @@
 # SyntaxMesh v0 architecture and implementation plan
 
-Status: proposed execution plan, 2026-09-27. The two source-of-truth documents in this directory remain authoritative for product intent. This plan makes the first implementation slice and its exit gates explicit.
+Status: active implementation plan; last updated 2026-10-22. The two source-of-truth documents in this directory remain authoritative for product intent. This plan records implementation evidence and the remaining v0–v5 exit gates.
 
 ## 1. Scope and release distinction
 
 ### Current execution priority: the complete v0–v5 vision
+
+[ADR-0365](adr/0365-registered-inference-stream-setup.md) closes the missing
+registered baseline-to-stream setup path. Penelope now journals the parent
+intent, ontology definitions, admission bounds, rebuild controls, and page
+budget before its registered rebuild and stream-initialization children; the
+runtime-neutral Engine exposes the scoped setup operation, and normal inference
+recovery includes registered setup intents. Existing unregistered request
+records remain unchanged. InMemory, File, and Turso recovery fixtures interrupt
+before the downstream effect, reopen/recover from the retained request, and
+publish a registered successor; the Engine fixture verifies end-to-end
+registered setup and synchronization. Twenty Engine tests and thirty-eight
+feature-enabled Penelope tests pass, as do strict all-target Clippy, formatting,
+and the architecture gate. This implementation slice alone is not completion
+of v0–v5.
+
+[ADR-0366](adr/0366-registered-inference-cli-configuration.md) connects that
+registered workflow to version-2 CLI configuration while preserving version 1.
+Config-only preflight binds bounded ontology definitions and derives semantic
+identity without opening stores; existing File/Turso setup and sync commands
+dispatch through Engine/Penelope for version 2. The full inference-enabled CLI
+test suite passes (including the registered File/Turso cases), as does strict
+all-target CLI Clippy. This closes the registered-inference CLI entry point, not
+the remaining v0–v5 exit gates.
+
+Full `cargo make ci` then passed in 169.25 seconds on 2026-10-22 after the
+registered setup File/Turso recovery fixtures and MCP read-tool discovery
+expectations were reconciled. The run covered formatting, architecture,
+out-of-tree extension isolation, SQLite/Turso/inference migration registries,
+instrumented and default workspace checks, strict Clippy, audit/deny, workspace
+tests, doc tests, and API documentation. Routine CI excludes the opt-in DuckDB
+adapter; the live semantic-provider test remains explicitly ignored/opt-in.
+This verifies the current tree but does not complete v0–v5.
+
+After registered CLI configuration and membership reconciliation, full
+`cargo make ci` passed again in 161.84 seconds on 2026-10-22. It covered the
+workspace architecture/extension/migration gates, strict Clippy, audit/deny,
+workspace tests and docs; the separate opt-in inference-enabled Penelope suite
+also passes. DuckDB remains outside routine CI.
+
+[ADR-0368](adr/0368-bounded-source-span-lexical-planner.md) adds an additive,
+opt-in source-span lexical index for current-generation indexed MCP context.
+It verifies host-provided bytes against the pinned file size/hash and source
+spans, then adds exact/stemmed body terms under independent span, byte, posting,
+and payload budgets. Historical indexed context retains its existing
+metadata-filtered label behavior because the host checkout is not guaranteed to
+contain old source bytes. Query (65 tests), source-content MCP unit/stdio tests,
+and strict Query/MCP Clippy pass. Full `cargo make ci` passed in 164.58 seconds
+after source span/file/byte/posting metrics were added; a later additive timing
+counter passed the instrumented Query tests and strict Query/MCP Clippy. Routine
+CI excludes the opt-in DuckDB adapter. Fixed-target, three-fresh-run comparisons
+against the same indexed host without body terms show a consistent
+small-budget signal: Penelope improved from 3/9 to 6/9, StateChronicle from 0/9
+to 6/9, and Shardline from 12/21 to 21/21. All three were 100% at 8,192 tokens
+with or without the new channel. Median query latency at 2,048 tokens ranged
+from -0.8% to +16.6%; at 8,192 it ranged from -3.5% to +28%.
+One Penelope build indexed 60 source spans from two files (18,096 source bytes)
+and reported separate bounded postings/payload accounting. These are
+selected-target iteration results, not full-repository acceptance; retrieval
+remains opt-in pending broader quality/cost analysis. Raw runs are retained
+under ignored `target/context-retrieval-results/`, including paired three-run
+source-content and label-only comparisons for all three STEXS projects.
+
+[ADR-0370](adr/0370-source-file-diverse-lexical-seeds.md) adds opt-in
+source-file-diverse seed selection without changing label-only order, score
+calculation, or the seed ceiling. A whole-repository StateChronicle run now
+retrieves all three fixed targets at both 2,048 and 8,192 tokens. Its single
+build indexed 23,392 nodes, 6,290 source spans from 220 files, and 2.30 MB of
+verified source; index construction took 9.21 seconds after 93.78 seconds of
+ingestion. The six queries passed their token limits; the cold 2,048-token
+query took 10.87 seconds and retained-index queries ranged from 1.23 to 4.70
+seconds. Target discovery now searches each target label directly rather than
+enumerating the whole graph through an empty query. This closes the specific
+StateChronicle whole-repository iteration and target-discovery failure, not
+repeatable retrieval, latency, multi-corpus acceptance, or default promotion.
+Source-content planning remains opt-in.
+
+[ADR-0371](adr/0371-score-aware-source-content-seeds.md) changes only opt-in
+source-content seed admission: exact/stemmed scores are fused, high-ranked
+primary candidates survive channel quotas, distinct source files retain a
+bounded diversity opportunity, and one aggregate posting budget remains in
+force. Fresh whole-repository Penelope and StateChronicle evaluations each pass
+all three fixed targets at both 2,048 and 8,192 tokens. StateChronicle indexed
+238 tracked supported files, 23,392 nodes, 6,290 source spans across 220 files,
+and 2.30 MB of verified source; ingestion took 98.92 seconds and source-index
+construction 9.61 seconds. This closes the previously observed Penelope seed
+miss and rechecks StateChronicle after the planner change, but it is one run per
+corpus, not repeatable quality/cost acceptance. Query latency remains high and
+the source-content path stays opt-in.
+
+[ADR-0372](adr/0372-fact-version-introduction-lineage.md) adds a Query and CLI
+operation resolving an exact retained fact version to the accepted event that
+opened it. It verifies both the retained `(fact, valid_from)` interval and the
+generation's direct `Added`/`Updated` event, with an indexed exact-version check
+in SQLite/Turso and no schema migration. The versioned temporal record explicitly
+means transition membership, not cross-fact causality. Query/API tests,
+File/SQLite/Turso/InMemory durable-reopen conformance, File/Turso CLI equivalence,
+strict Clippy, and the architecture gate pass. Full `cargo make ci` passes in
+202.73 seconds, including workspace checks/tests, extension and migration gates,
+audit/deny, docs, and the new temporal record; routine CI excludes DuckDB and the
+live semantic-provider test remains opt-in. This is one v5 Stage B primitive,
+not full semantic origin/blame or v5 completion.
+
+[ADR-0373](adr/0373-fact-version-retirement-lineage.md) adds the complementary
+generation-pinned query for the exact accepted event that closed a retained
+fact version. It validates the direct `Updated`/`Removed` membership at the
+version's exclusive end generation and deliberately calls this retirement,
+not semantic resolution. This reuses retained fact-history and event indexes,
+requires no database migration, and increments the temporal export schema to
+13. InMemory query fixtures cover update, removal, active versions, and
+historical pinning; File/Turso CLI equivalence covers durable indexed history
+and direct event lookup. API round-trip, strict Query/CLI Clippy, architecture,
+and full `cargo make ci` pass in 171.68 seconds. SQLite uses the same query
+service over its existing indexed history/event implementations; no new
+storage migration or DuckDB build was required. This advances v5 Stage B, not
+completion of `ResolvedBy` semantics or the v0–v5 product scope.
+
+Retirement conformance follow-up (2026-10-22): the shared retained-lineage
+fixture now checks exact fact-version retirement on InMemory, File, SQLite, and
+Turso, including durable close/reopen. It confirms the closing event is
+generation-pinned (not visible from the predecessor snapshot), identifies the
+direct `Updated` event for the retired version, and leaves the successor and
+no-op versions without false retirement records. The focused four-store
+conformance test passes. This strengthens v5 Stage B restart/backend evidence;
+it does not infer semantic resolution from an update.
+
+[ADR-0374](adr/0374-indexed-exact-fact-version-validity.md) removes the
+history-depth scan from that retirement point lookup. The store port now
+resolves one exact `(fact, valid_from)` interval; SQLite and Turso seek their
+existing identity/start key and obtain the exclusive end from generation
+history, while InMemory/File remain reference implementations. A non-null end
+sequence without its retained generation fails as integrity corruption. No
+schema migration or serialized contract change was needed. Query, SQLite,
+Turso, and shared restart/backend conformance suites pass; the shared fixture
+also verifies pinned retirement remains correct on all four backends. This is
+an indexed lookup improvement, not semantic resolution or causal attribution.
+
+After this retrieval and target-discovery change, `cargo make ci` passed in
+184.40 seconds on 2026-10-22. It covered workspace formatting, architecture,
+extension isolation, migration registries, instrumented/default checks, audit
+and deny, workspace tests, doc tests, and API documentation. DuckDB remains
+outside routine CI; the manual corpus evaluation is separate from this gate.
+
+StateChronicle opt-in invariance is now tested differentially at the Engine
+boundary on the in-memory, File, SQLite, and Turso stores: identical inputs and
+boundary over two generations: an edited source creates a retained predecessor
+and successor. Identical inputs and generation identities produce the same
+generation manifests (ignoring verification status), historical snapshots,
+generation history, searches, `GraphAt`, and `ChangedBetween` results with
+verification disabled or enabled; current statuses remain `Durable` and
+`Verified` respectively. File, SQLite, and Turso are closed and reopened before
+the same assertions are repeated. The focused Engine suite and strict Engine
+Clippy pass for the multi-generation extension. Full `cargo make ci` passed in
+141.04 seconds on 2026-10-22 before that extension, covering the then-current
+workspace boundary, migration, security/dependency, test, and documentation
+gates. Routine CI excludes DuckDB and live-provider/manual retrieval evaluation.
+Broader multi-generation cases, including rejection/failure paths, remain open.
+
+ADR-0355 provides opt-in CLI inference configuration admission, explicit migration,
+File/Turso setup, immediate-successor synchronization, recovery, and detached
+checkpoint/page reads. Targeted binary tests cover claim creation,
+retraction/restoration with new claim identities, retained baseline history,
+idempotent receipts, writer ownership, cursor substitution rejection and empty
+retracted selections. Detached reads succeed while canonical ownership is held.
+Five bounded configuration/receipt tests and strict all-target Clippy pass.
+Configuration admission reports semantic identity without storage access; it is
+not a complete rule-execution validation or an implicit migration.
+
+A dedicated File/Turso CLI recovery test verifies prepared parent intent survives
+an interrupted effect: after explicit migration, reopening and recovery need no
+original request, two claims are retained, and repeat recovery is empty. Broader
+binary interruption scenarios remain unfinished. The latest full contributor CI
+attempt passed formatting, architecture, extension isolation, migration checks,
+instrumented/all-feature workspace checks and strict Clippy, then failed audit on
+new rustls/webpki and DuckDB `zip` advisories. Rustls/webpki and DuckDB are now
+updated to compatible fixed versions; a fresh `cargo audit` reports no
+vulnerabilities (only the existing policy-allowed unmaintained/yanked warnings).
+Targeted HTTP TCP boundary tests and strict HTTP Clippy pass, as do default and
+feature-enabled MCP checks and strict MCP Clippy. Full contributor CI has not
+been rerun on the dependency-updated state. The feature-enabled HTTP host now
+has live positive retained-checkpoint/page tests over operator-bound downstream
+databases. HTTP and MCP each traverse a two-claim retained selection with a
+one-claim first page and a bound cursor continuation, returning the second claim
+and then no further cursor. Daemon operator configuration is now available behind
+the opt-in `inference-sqlite` feature, with bounded versioned JSON and explicit
+receipt files. Loader/parser coverage and a lifecycle test prove invalid config
+fails before canonical reconciliation. A positive lifecycle test proves the
+same binding reaches both HTTP and MCP, returns retained data and leaves the
+downstream database byte-identical; broader temporal-history coverage and the
+higher v0–v5 layers remain open.
+
+[ADR-0356](adr/0356-host-bound-retained-inference-reads.md) now has initial
+opt-in HTTP and MCP checkpoint/page delivery with operator-installed scoped
+bindings, pure versioned DTOs, independent page limits and no client-selected
+filesystem paths or implicit workflow effects. Positive HTTP and MCP tests now
+verify checkpoints, bounded first pages and cursor-bound continuations against
+two retained claims. Temporal-history coverage and end-to-end daemon/operator
+configuration remain unverified; this is not a completed host delivery.
+
+[ADR-0357](adr/0357-daemon-retained-inference-read-configuration.md) wires
+strict versioned operator bindings into the shared-owner daemon behind an opt-in
+feature. Config and origin receipt sizes are bounded, relative paths resolve
+from the config directory, and malformed configuration is rejected before
+canonical reconciliation. Loader/parser tests pass. Daemon lifecycle tests
+cover configured HTTP checkpoint/page and MCP checkpoint delivery, malformed
+config fail-fast, and byte-identical downstream storage after reads.
+
+Full contributor CI including ADR-0352 through ADR-0354 passed in 293.87 seconds
+on 2026-10-09. The out-of-tree extension fixture lockfile now includes the
+compile-time forwarding dependency without unrelated version changes. Formatting,
+architecture, extension isolation, migration gates, mixed-instrumentation and
+all-feature checks, strict Clippy, dependency policy, workspace tests, doc tests
+and API documentation pass. Dev/test debug symbols and incremental compilation
+remain disabled; assertions and gates remain enabled. Policy-allowed warnings and
+opt-in ignored tests remain. This snapshot predates CLI inference delivery
+(ADR-0355) and does not establish completion of v0–v5 or retrieval quality.
+
+Full contributor CI for the pre-ADR-0352 inference/history/recovery snapshot passed
+in 302.95 seconds on 2026-10-07: formatting, architecture, extension isolation,
+all migration gates, mixed-instrumentation and all-feature workspace checks,
+strict Clippy, dependency policy checks, all-feature tests and API documentation.
+Dev/test debug symbols and incremental compilation were disabled for this run
+to fit available disk space; assertions and validation gates remained enabled.
+Policy-allowed dependency warnings remain, and opt-in live-model quality/timing
+tests remain ignored. This verifies the current implementation, not completion
+of the v0–v5 product requirements or host-integrated inference delivery.
+
+[ADR-0346](adr/0346-durable-inference-materialization-boundary.md) now has an initial
+separate SQLite downstream materializer: explicit checksummed migrations,
+generation-pinned bounded rebuilds, atomic complete claim/posting/watermark
+publication, and retained reads without canonical replay. Full incremental
+synchronization and user-facing delivery remain open. An opt-in Penelope rebuild
+coordinator now journals before the effect, recovers File/Turso prepared requests,
+and validates completed retries without rule replay. All twenty-seven Penelope
+integration tests, strict feature-enabled Clippy and the architecture gate pass. This
+is an opt-in foundation, not completion of v2–v5.
+
+[ADR-0347](adr/0347-retained-inference-premise-closure-lifecycle.md) adds exact
+premise closure coordinates, explicit v1→v2→v3 inference migrations, and direct
+indexed invalidation with retained validity/reasons and checked-through coverage.
+Seven storage tests and four-backend closure fixtures pass; strict Clippy,
+architecture and migration-registry checks pass. Opt-in Penelope lifecycle
+recovery now retains exact range receipts, including recovery after later coverage
+advances, without changing existing rebuild journal bytes. Discovery of newly
+enabled claims and host delivery remain open; invalidation alone is not a complete
+synchronization algorithm.
+
+Full contributor CI passed for this materialization/lifecycle/recovery snapshot
+in 484.79 seconds, including all-feature workspace tests and API documentation.
+[ADR-0348](adr/0348-seeded-inference-discovery.md) now implements pure exact-premise
+seeded witness discovery, with twenty-five unit tests, Rust-source integration
+and strict Clippy. Differential coverage includes every seed on all 512 directed
+three-node graphs. Canonical Query range admission now passes four-backend
+creation/retraction/restoration fixtures and malformed-feed checks with strict
+Clippy. Atomic durable synchronization checkpoints remain open; this is not a full-engine incremental
+command or an O(1) input-loading guarantee. This latest slice has targeted checks,
+not a subsequent completed full CI run.
+
+[ADR-0349](adr/0349-incremental-inference-stream-checkpoints.md) adds separate
+stream storage and atomic bounded initialization from a complete baseline,
+without treating witness deltas as complete rebuilds. Ten storage tests, strict
+Clippy and the explicit four-entry migration gate pass. Direct atomic
+immediate-successor synchronization is now implemented, with thirteen storage
+tests covering transient lifetimes, witness oracles, independent bounds and mixed
+closure/discovery rollback. Public retained interval reads now pass fifteen
+storage tests, including reopen without a canonical store and strict
+payload/posting/selection admission. [ADR-0350](adr/0350-persistent-inference-active-set-roots.md)
+now replaces active-ID interval scanning with immutable compressed active-set
+roots and exact payload seeks. Twenty storage tests pass, including one-page
+active reads after 64 closed lifetimes, unchanged-root reuse, historical root
+stability and explicit migration rollback. Strict Clippy and the five-entry
+migration gate pass. Bounded generation-pinned point membership now passes
+set-oracle, sparse-history and reopen checks without payload loading.
+Host-integrated synchronization remains open. Targeted projection checks are now
+also covered by the completed contributor CI snapshot recorded above.
+
+Exact point payload reads now share retained enumeration's interval, digest,
+scope and ordered-premise validation. Sparse-history tests verify independent
+byte/posting/page bounds and reopen without canonical replay. Generation-pinned
+paged output now passes twenty-two storage tests and strict Clippy, including
+cursor binding, exact budgets, retained output after retraction/reopen and
+compressed-tree pruning. A late 1024-key tree seek uses 21 page loads, not a walk
+over preceding results.
+
+[ADR-0351](adr/0351-penelope-inference-stream-synchronization.md) now adds opt-in
+Penelope stream synchronization recovery. Twenty-nine feature-enabled integration
+tests pass, including File/Turso restart on both sides of SQL publication,
+sequence-ordered successor recovery, old receipts after later heads and unchanged
+rebuild journal bytes. Durable stream initialization now also passes File/Turso
+restart fixtures, recovering before successors and preserving advanced heads.
+All thirty-one feature-enabled integration tests, strict Clippy, twenty-two
+storage tests and the architecture gate pass. Explicit migrations and complete
+baseline rebuild/recovery remain prerequisites. Host delivery remains open;
+this is not completion of the complete v0–v5 roadmap.
+
+[ADR-0352](adr/0352-engine-inference-application-service.md) now exposes opt-in
+engine inference setup, synchronization and recovery, using borrowed store ports
+and the existing Penelope coordinators. Nineteen engine tests, strict Clippy and
+the architecture gate pass, including File/Turso scope rejection, retained
+retraction/restoration and reopen. This latest slice has targeted checks.
+[ADR-0353](adr/0353-durable-inference-setup-intent.md) now journals parent setup
+intent before either child, closing the baseline/initialization preparation gap.
+Thirty-three Penelope integration tests cover File/Turso interruptions at each
+child boundary, corrupt records, missing completed effects and advanced heads.
+Nineteen engine tests also verify reopening and recovery without resubmitting
+the original setup request. Strict Clippy and architecture checks pass; full
+contributor CI has not yet been rerun after these two ADRs. CLI/HTTP/MCP command
+delivery remains open.
+
+[ADR-0354](adr/0354-engine-retained-inference-reads.md) adds scoped engine
+checkpoint and bounded page reads over retained downstream roots. File/Turso
+fixtures compare exact pages after reopening, reject substituted cursors and
+invalid admission, and reject foreign scope before destination access. An engine
+with empty canonical storage returns the same retained output without replay.
+Nineteen feature-enabled engine tests, strict Clippy and architecture checks pass.
+Host commands and pure transport DTO integration remain unfinished.
+
+The opt-in inference Query adapter passes authoritative-version retraction and
+reopen lifecycle fixtures across InMemory, File, SQLite and Turso, including
+malformed identity/interval/order/continuation rejection. Full contributor CI
+passed for this adapter (208.28 seconds). This is a v2/v3/v5 foundation, not
+completion of those layers: durable materialization, automatic premise
+propagation and user-facing inference delivery remain open.
+
+[ADR-0332](adr/0332-bounded-premise-dependency-index.md) adds bounded exact-version
+premise-to-claim lookup without rule replay. Seven inference unit tests and a
+real Rust extraction/resolution integration pass, alongside strict Clippy.
+Lookup is logarithmic plus posting work, not an O(1) guarantee. This index
+identifies directly affected claims; it does not perform durable invalidation.
+
+[ADR-0333](adr/0333-explicit-dependency-index-selection-binding.md) adds checked
+repository/worktree/generation binding, including empty complete claim sets.
+The eight inference unit tests and four-backend change-feed lifecycle fixtures
+pass with strict Clippy. Workflow consumers must bind lookup to the retained
+claim selection, not substitute the later change-feed generation.
+
+[ADR-0334](adr/0334-bounded-deterministic-rule-set-evaluation.md) implements
+independent rule-set evaluation with shared edge-visit/output budgets,
+duplicate-rule rejection and input-order-independent results. Query loads one
+authoritative premise selection for the set. Nine inference unit tests, Rust
+source integration and four-backend retained/retracted rule-set fixtures pass
+with strict Clippy. Recursive chaining and durable publication remain open.
+
+[ADR-0335](adr/0335-explicit-inference-derivation-class.md) makes derivation class
+explicit, separate from premise evidence or probabilistic confidence. The current
+evaluator emits only deterministic-rule claims, with the class in schema-2
+identity. Pure and four-backend lifecycle tests and strict Clippy pass; other
+derivation producers and full workspace CI for this latest slice remain open.
+
+[ADR-0336](adr/0336-rule-set-ontology-version-consistency.md) rejects conflicting
+ontology versions and empty binding identifiers within one rule-set selection,
+charging binding checks to the shared work budget. Ten inference unit tests,
+Rust-source integration and four-backend conflict checks pass with strict Clippy.
+Ontology existence, compatibility, registration and migrations remain open.
+
+[ADR-0337](adr/0337-explicit-ontology-version-registry.md) adds a bounded supplied
+version registry and opt-in registered evaluation. Unknown namespace/version
+bindings reject before Query loads facts. Eleven inference unit tests, Rust
+integration and four-backend registered Query fixtures pass with strict Clippy.
+This verifies supplied version existence only; concept/relation declarations,
+semantic compatibility, registry persistence and migrations remain open. Full
+CI for the preceding inference slice passed in 179.22 seconds; the latest
+registry slice has targeted verification rather than a completed new full run.
+
+[ADR-0358](adr/0358-bounded-ontology-schema-admission.md) adds bounded pure
+ontology definitions and checks a registered rule's concept and exact external
+relations against its namespace/version declaration before retained-fact
+evaluation. Twenty-six inference tests (including source integration),
+sixty-six Query tests, two SQLite/Turso retained-history tests and strict
+all-target Clippy pass. The shared schema-backed Query fixture runs on all four
+reference/durable adapters. Schema compatibility/domain-range constraints,
+durable ontology registry and migrations remain open. This is declaration
+admission, not the complete v2 ontology subsystem.
+
+[ADR-0359](adr/0359-bounded-ontology-relation-signatures.md) advances ontology
+definitions to schema v2 with bounded relation subject-domain/object-range
+concept sets, rejects constraints that reference undeclared concepts, and
+requires declared rule target concepts to fit declaration/output relation
+ranges. The same 26 inference, 66 Query, two SQLite/Turso history tests, strict
+Clippy and architecture gate pass. Fact-level validation of retained edge
+endpoints, source-domain enforcement, diagnostics and durable registry remain
+open; this is typed schema admission, not complete ontology conformance.
+
+[ADR-0360](adr/0360-explicit-ontology-instance-membership.md) advances to
+schema v3 with an explicit per-ontology instance-membership relation. Registered
+Query evaluation now derives types only from those active retained assertions,
+validates constrained fact endpoints and derived output claims, and charges
+schema/fact/type work to the shared edge-visit budget. Pure tests cover missing
+subject/object types, undeclared instance targets and budget exhaustion; the
+shared Query fixture verifies both valid typing and fact-invalid schema
+rejection across InMemory, File, SQLite and Turso. Twenty-six inference tests,
+sixty-six Query tests, two SQL retained-history tests, strict Clippy, formatting
+and the architecture gate pass. Durable materializers and diagnostic APIs still
+need this validator before claiming ontology conformance; schema persistence,
+migrations and richer diagnostics remain open.
+
+[ADR-0361](adr/0361-ontology-fingerprints-in-inference-identity.md) adds a
+canonical, order-independent fingerprint for each ontology definition and
+returns an opaque `BoundRuleSet` whose effective rule configuration
+fingerprints include the exact schema definitions used. This changes rule-set,
+claim, and materialization identities without changing serialized Rule/Claim
+layouts, bincode journal payloads, SQLite payloads, or the inference DTO schema.
+Schema-backed Query binds once before retained-history reads and evaluates using
+that same bound set; independently persisted/materialized rules must likewise
+use the returned bound rules. Schema edits under an unchanged namespace/version
+produce distinct claim identities. Twenty-seven inference unit tests plus the
+Rust-source integration, sixty-six Query tests, twenty-three SQLite inference
+tests, four inference-host tests, twenty-three API-model tests, twenty Penelope
+integration tests, and two SQLite/Turso retained-history tests pass. Workspace
+all-target check and strict Clippy, formatting, architecture boundaries, and
+the default DuckDB-excluding build pass. Durable ontology definition storage,
+cross-version compatibility rules, and materializer-level automatic registry
+loading remain open.
+
+[ADR-0362](adr/0362-registered-inference-materialization.md) adds an explicit
+registered-rebuild entry point to the downstream SQLite materializer. It binds
+once, uses the same bound rules for Query fact/schema validation and operation
+identity, and publishes claims only after validation succeeds. [ADR-0363](adr/0363-penelope-registered-inference-rebuilds.md)
+adds an independent versioned Penelope journal for registered complete rebuilds;
+it persists canonical ontology definitions and admission bounds, then recovers
+without resubmitting caller state. [ADR-0364](adr/0364-registered-inference-stream-successors.md)
+adds registered delta-seeded discovery, atomic SQLite successor publication,
+and a distinct recovery journal carrying those same definitions. New target facts
+are validated against the complete selected schema fact set. Membership
+retractions use the bounded target-generation reconciliation in ADR-0367 rather
+than leaving claims active. The Query suite (66), SQLite inference suite (24),
+and feature-enabled Penelope suite (38) pass with strict all-target Clippy;
+unregistered journal compatibility remains covered. Durable ontology catalog
+history, cross-version compatibility, host command delivery, and full
+contributor CI remain open. This is not yet complete ontology-aware temporal
+inference.
+
+[ADR-0367](adr/0367-registered-stream-membership-reconciliation.md) now replaces
+the membership-retraction rebuild requirement with bounded full evaluation at
+the changed target generation, closing and reseeding active stream claims in one
+SQLite transaction. Ordinary registered successors remain delta-seeded; no
+historical graph replay or public claim/journal/schema change is introduced.
+SQLite and Penelope retraction/restoration plus prepared-request recovery pass;
+budget exhaustion preserves the prior head. Feature-enabled SQLite (24 tests)
+and Penelope (38 tests) suites, strict all-target Clippy, formatting, migration
+registries, architecture checks, and full contributor CI (161.84 seconds) pass.
+Durable ontology catalog history, cross-version compatibility, host command
+delivery, and full ontology-aware temporal reasoning remain open.
+
+[ADR-0338](adr/0338-daemon-partial-source-processing-option.md) exposes explicit
+daemon `--record-syntax-failures`, preserving strict defaults. A real verified
+Turso process fixture covers strict rejection, partial healthy-source publication,
+repair on restart and unchanged retained history. Daemon unit/process tests and
+strict Clippy pass. This is a startup policy, not hot-reloaded configuration.
+
+[ADR-0339](adr/0339-daemon-indexed-mcp-context-policy-options.md) adds optional
+daemon source-content and lexical-first indexed MCP policies. Parser and real
+transport tests pass, including a nonempty pinned context pack and watch refresh;
+strict daemon Clippy passes. HTTP remains on its ordinary context path, so full
+HTTP/MCP indexed-policy parity is still open. Defaults remain unchanged.
+
+Daemon partial processing also passes live repair without restart through both
+polling and native watch. Current and retained HTTP reads verify healthy-source
+continuity and generation isolation. The targeted process test and strict Clippy
+pass; this complements the verified restart fixture under ADR-0338.
+
+[ADR-0340](adr/0340-generation-pinned-inference-premise-reader.md) adds bounded
+exact witness resolution through existing indexed fact-version lookups in
+SQLite/Turso. Four-backend fixtures verify ordered historical premises, clipped
+future closure and rejection of foreign or closed witnesses. Targeted tests and
+strict Clippy pass. Reference backends can scan internally; this is neither
+an O(1) guarantee nor validation that a supplied claim follows its named rule.
+
+[ADR-0341](adr/0341-bounded-rule-witness-verification.md) separately verifies the
+supported rule's path/join witness, metadata and schema-2 claim identity after
+authoritative premise resolution. Twelve inference unit tests, Rust integration
+and four-backend retained claim verification pass with strict Clippy. This proves
+one derivation, not claim-set completeness, ontology compatibility or recursive
+proofs. The preceding workspace CI passed in 185.61 seconds; the latest premise
+reader/verifier additions have targeted verification only.
+
+[ADR-0342](adr/0342-inference-input-byte-budget.md) adds mandatory evaluator
+input-byte limits with allocation-free counting preflight. Fourteen inference
+unit tests include exact byte boundaries and oversized extension/rule inputs;
+Rust integration, four-backend lifecycle fixtures and strict Clippy pass.
+This bounds encoded evaluator input, not caller allocations or exact heap use;
+host decoding, registry construction and proof readers need independent bounds.
+
+[ADR-0343](adr/0343-ontology-registry-byte-admission.md) adds mandatory registry
+construction/validation byte admission and borrowed namespace/version lookup.
+Registered Query validates rule bytes before retained fact loading. Fifteen
+inference unit tests, Rust integration, four-backend fixtures and strict Clippy
+pass. Proof readers still have count bounds rather than byte admission.
+
+[ADR-0344](adr/0344-bounded-inference-invalidation-range-query.md) identifies
+affected retained claims over accepted generation ranges through existing change
+feeds and exact dependency postings. Four-backend deletion/restoration fixtures
+and generation/version/posting exhaustion tests pass with strict Clippy. This is
+read-only direct invalidation planning, not durable retraction or recursive
+propagation. A stable full contributor CI rerun passed in 209.44 seconds,
+including Query doc tests, after an earlier documentation-test failure.
+The later exact-budget empty-transition regression was reproduced and fixed;
+all four backend fixtures and strict Clippy pass for that targeted follow-up.
+Malformed-feed injection now passes eleven substituted-page rejection cases,
+foreign-index and reversed-range checks. A feed-only fixture forbids graph/history
+reads and writes at the Query boundary while the valid range still succeeds.
+Targeted tests and strict Query Clippy pass. Broader invalidation corpora remain
+release gates; delegated reference-store internals may still scan history.
+
+[ADR-0345](adr/0345-exact-premise-invalidation-explanations.md) adds scoped
+claim-to-changed-premise explanations with independent work/claim/evidence bounds.
+Sixteen inference unit tests, Rust-source integration and strict inference Clippy
+pass. This explains direct postings only; host delivery, recursive propagation
+and durable retraction remain open.
+
+Query range explanation delivery now shares the validated change-feed scan with
+ID-only invalidation. Four-backend exact-evidence fixtures and fourteen malformed
+feed cases pass for both paths, with strict Query Clippy. Host wire delivery is
+not implemented by this optional Rust API.
+
+The approved whole-Shardline release sample now indexes 820 supported files and
+retrieves all seven required targets at both budgets with explicit lexical-first
+source-content packing. Evidence:
+`target/context-retrieval-results/context-20261002T192050.939833Z-07e470c48cdf`.
+This is one full-corpus fixed-target sample, not exhaustive relevance or repeated
+performance evidence. No default promotion follows from it.
+
+The four-backend inference lifecycle also verifies deletion followed by restoration
+of the same edge identity: a new premise version matches only the new claim's
+dependency index, while historical witnesses remain unchanged. Targeted tests
+and strict Clippy pass. This closes a temporal correctness gate, not durable
+automatic truth maintenance.
+
+Approved-source retrieval evidence (2026-10-02): a clean committed Shardline
+source at `56f750c02746966fcfaa39616fbf6c23ef98aa07` retrieves all seven exact
+targets at both 2,048 and 8,192 tokens through indexed source-content MCP with
+explicit lexical-first packing. The selected-file sample includes production
+Rust, a qualified Rust test, Python, Bash, a documentation heading and rationale.
+Evidence: `target/context-retrieval-results/context-20261002T191948.090917Z-07e470c48cdf`.
+This is one selected-file debug sample, not full-corpus coverage or repeated
+performance evidence. Defaults remain unchanged. Direct evaluator origin checks
+and strict MCP Clippy pass; external benchmarks are restricted to approved
+STEXS-Technologies repositories.
 
 ADR-0330 records the next higher-roadmap slice: optional restricted deterministic
 inference above canonical facts, reusing Slotstrike's pure specification pattern
@@ -27,7 +564,7 @@ The table below is a capability map, not a completed release audit.
 
 | Layer | Existing foundation | Required next evidence/capability |
 | --- | --- | --- |
-| v0 | Rust-native supported-language/docs extraction, incremental graph, durable Engine, stores, search/traversal/context and hosts | Close release gates with representative end-to-end ingestion/retrieval and operational evidence; finish visible partial-processing integration |
+| v0 | Rust-native supported-language/docs extraction, incremental graph, durable Engine, stores, search/traversal/context and hosts | Partial-processing integration is covered through live/restart daemon repair; representative end-to-end ingestion/retrieval quality and operational evidence remain |
 | v1 | Migration registries, public DTOs/SDKs, independent extension fixtures and restart/conformance tests | Audit stability promises, production/cross-platform operations, workspace/service and interoperability requirements individually |
 | v2 | Provenance-backed documentation semantics and semantic job/cache workflows | Implement and verify the higher-level ontology, derivation, contract/drift and explanation requirements; do not equate AI triples with complete reasoning |
 | v3 | Distinct static/runtime evidence and public extension ingestion | Verify engineering-knowledge reconciliation across the fact, knowledge, reasoning and delivery planes using real supported workflows |
@@ -2799,6 +3336,94 @@ Exit: queries match store facts after edit/restart, traverse without whole-graph
 Exit: embedded and standalone hosts behave equivalently; an extension failure is isolated; operators can tell whether a generation is durable, verified, stale, or recovering.
 
 ### Gate 5 — v0.1 product completion
+
+STEXS-only context retrieval quality expansion (2026-10-22): the fixed-target
+retrieval harness now accepts the approved Shardline, Penelope, and
+StateChronicle repositories and rejects other origins. Three fresh-index runs
+per newly added corpus use only named source files and documentation sections;
+they do not claim whole-repository relevance. At 8,192 tokens all 9/9 targets
+were retrieved on both Penelope and StateChronicle. At 2,048 tokens Penelope
+retrieved 0/9 and StateChronicle 6/9, so compact-budget quality remains a clear
+open retrieval issue; no ranking behavior was changed to fit these cases.
+Median query latency was 762 ms / 881 ms (8,192-token Penelope / StateChronicle)
+and 320 ms / 396 ms (2,048-token budgets), measured on one Linux x86_64 host
+with fresh Turso databases. These are directional harness timings, not an SLA.
+Raw per-run evidence is retained in ignored `target/context-retrieval-results/`
+under `context-20261022T130424.148208Z-07e470c48cdf` and
+`context-20261022T130624.830729Z-07e470c48cdf`; selected fixture revisions and
+input fingerprints are recorded in each summary. The new evidence broadens the
+v0 quality signal but does not close Gate 5 or replace wider representative
+workflow, language, restart, and operational coverage.
+
+Repository-scope Penelope follow-up (2026-10-22): repository mode now indexes
+only tracked supported inputs, excluding four untracked generated files found
+in the local fixture worktree; a test protects this boundary. On the 93-file
+tracked corpus, one fresh run missed all three fixed targets at both 2,048 and
+8,192 tokens. The complete lexical reference had 7,715 nodes and ranked those
+target definitions/chunks 67th, 511th, and 90th respectively; the indexed family
+seed plan matched its reference oracle but its 32-seed initial cap cannot admit
+them. This shows candidate recall—not merely pack size—is the limiting stage in
+this corpus. The run is a single failed diagnostic, not a representative quality
+claim or justification for increasing limits or adding target-specific quotas.
+Raw evidence: `target/context-retrieval-results/context-20261022T131314.096734Z-07e470c48cdf`
+and `target/context-retrieval-results/context-20261022T131419.105967Z-07e470c48cdf`.
+The next retrieval work must address general source-content candidate recall,
+then validate on multiple tracked STEXS corpora before any default ranking change.
+
+Penelope same-fingerprint source-content recheck (2026-10-22) refines that
+diagnosis. Three fresh balanced runs on the same 93 tracked files and
+`8d25a463…` input fingerprint scored 6/9 at 2,048 tokens and 9/9 at 8,192.
+`BlobRef::verify` was selected as seed 28/32 and survived bounded graph
+selection, but was omitted from the 2,048-token pack; the recovery-document
+target was recovered through a one-hop graph neighbor. Thus the earlier
+label/family-only candidate-cap miss does not describe the source-content path:
+the remaining compact-budget miss is evidence ordering/packing for this
+selected target. On this same fingerprint, `lexical-first` packing repeatedly
+regressed to 3/9 and 6/9, so it is rejected; `test-last` repeated the balanced
+6/9 and 9/9 result and does not resolve the miss. No default policy changed.
+The harness now records all requested fresh runs for this recognized retrieval
+quality failure, writes the complete per-run matrices and summary, then exits
+nonzero; non-quality execution errors still stop immediately. This enables
+repeatable negative evidence instead of losing the remaining runs after the
+first miss. Bundles: `context-20261022T153821.887552Z-07e470c48cdf`
+(balanced), `context-20261022T154143.483002Z-07e470c48cdf` (lexical-first),
+and `context-20261022T154504.407039Z-07e470c48cdf` (test-last), all under
+ignored `target/context-retrieval-results/`. These are repeated results on one
+dirty external corpus, not broad acceptance or a latency SLA.
+The harness change's unit test, strict Clippy, architecture gate, and full
+`cargo make ci` pass (147.74 seconds); routine CI excludes the opt-in DuckDB
+adapter and the live semantic-provider evaluation.
+
+Whole-repository source-content follow-up (2026-10-22): StateChronicle's
+repository-scope run now resolves target IDs against the pinned generation
+rather than the MCP name-search endpoint's 100-result cap. On 238 tracked
+supported files (23,392 nodes; 26,687 edges), source-content retrieval found
+the `execute` function in `transition.rs` only at 8,192 tokens, found
+`verify_bundle` at both budgets, and found the aligned architecture-table
+`Infrastructure independence` DocumentChunk at both budgets (5/6 checks).
+A matched label-only run over the same 238-file input fingerprint retrieved
+only the documentation chunk at 8,192 tokens (1/6 checks). This is useful
+single-run evidence that source content improves full-repository recall, not
+acceptance: the source-content 2,048-token transition request still missed
+despite the target being selected (seed position 4, packing position 6), which
+points to greedy full-span packing rather than candidate discovery for that
+case. The focused v0 slice added deterministic, source-located excerpt packing
+and budget-pressure compaction of already-admitted source spans. On a repeat
+against the same input fingerprint, source-content retrieval found all three
+targets at both budgets: `execute` at 2,048 tokens (2,031 packed),
+`verify_bundle` at 2,048 (2,046 packed), and the aligned documentation chunk at
+2,048 (2,031 packed); all three also passed at 8,192 tokens. The target
+candidate diagnostic remained selected at seed position 4 / packing position 6
+for `execute`, so the gain is in packing, not candidate discovery. This is one
+successful corpus replay, not a general quality or cost acceptance; source
+content remains opt-in, and multi-corpus comparisons are still required before
+changing defaults. The repeat's cold first request was 10.08 seconds, including
+index construction; this is not a repeated-cost estimate or an SLA.
+Source mode's first request was 9.61 seconds versus 3.94 seconds for label-only;
+these cold measurements include index construction and are not repeated-cost
+estimates or an SLA. Source-content remains opt-in. Repeat runs, bounded
+cold-build-cost evaluation, and multi-corpus quality checks remain required
+before changing the ranking policy.
 
 ECMAScript receiver-scope precision (2026-09-30): Oxc class/function boundaries
 now distinguish a named method's `this` context from ordinary nested functions

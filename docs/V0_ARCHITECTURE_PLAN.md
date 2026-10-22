@@ -174,6 +174,16 @@ later removal changes a forbidden contract from contradicted to insufficient
 evidence. Host delivery and durable contract-result history remain open; this
 is not complete v2 drift analysis.
 
+[ADR-0378](adr/0378-mcp-generation-pinned-contract-evaluation.md) exposes the
+same read-only evaluation through a versioned MCP tool for any harness. It pins
+current or explicitly selected retained generations, bounds contracts and
+history/work budgets, and serializes exact evidence versions while preserving
+`insufficient_evidence`. MCP tool discovery, successful supported/indeterminate
+results, invalid relation rejection, and the stdio protocol are covered.
+Durable authored contracts/results, policy enforcement, and measured harness
+benefit remain open; this advances v2/v4 integration but is not release
+completion.
+
 After this retrieval and target-discovery change, `cargo make ci` passed in
 184.40 seconds on 2026-10-22. It covered workspace formatting, architecture,
 extension isolation, migration registries, instrumented/default checks, audit

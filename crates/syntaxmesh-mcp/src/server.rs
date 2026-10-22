@@ -16,6 +16,9 @@ use syntaxmesh_api_model::ContextRequest;
 use syntaxmesh_context_host::RepositorySourceReader;
 use syntaxmesh_core::{GenerationId, NodeId, RepositoryId, StableId, WorktreeId};
 use syntaxmesh_engine::SyntaxMeshEngine;
+use syntaxmesh_inference::{
+    Contract, ContractLimits, ContractOrigin, ContractOutcome, RelationExpectation,
+};
 use syntaxmesh_lang_rust::RustExtractor;
 use syntaxmesh_language_sdk::LanguageExtractor;
 use syntaxmesh_query::{ContextTokenCounter, Query};
@@ -87,6 +90,61 @@ struct ContextArgs {
     /// Maximum graph candidates considered (1–256, default 64).
     #[schemars(range(min = 1, max = 256))]
     max_candidates: Option<u16>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct ContractRelationArgs {
+    /// Core relation name in snake_case, or `external`.
+    kind: String,
+    /// Required only when kind is `external`.
+    #[schemars(length(max = 128))]
+    namespace: Option<String>,
+    /// Required only when kind is `external`.
+    #[schemars(length(max = 128))]
+    relation: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+enum ContractExpectationArgs {
+    Required,
+    Forbidden,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct ContractItemArgs {
+    #[schemars(length(min = 1, max = 128))]
+    id: String,
+    #[schemars(length(min = 1, max = 64))]
+    version: String,
+    #[schemars(length(min = 64, max = 64))]
+    source: String,
+    #[schemars(length(min = 64, max = 64))]
+    target: String,
+    relation: ContractRelationArgs,
+    expectation: ContractExpectationArgs,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct EvaluateContractsArgs {
+    schema_version: u32,
+    /// Optional retained generation; omitted means host-selected default.
+    #[schemars(length(max = 64))]
+    generation: Option<String>,
+    #[schemars(length(max = 32))]
+    contracts: Vec<ContractItemArgs>,
+    /// Maximum retained fact-history entries scanned (1–100000, default 10000).
+    #[schemars(range(min = 1, max = 100000))]
+    history_scan_budget: Option<u64>,
+    /// Maximum aggregate serialized evaluation input (1–4194304, default 1048576).
+    #[schemars(range(min = 1, max = 4194304))]
+    input_byte_budget: Option<u64>,
+    /// Maximum contract-to-edge comparisons (1–1000000, default 100000).
+    #[schemars(range(min = 1, max = 1000000))]
+    edge_visit_budget: Option<u64>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -366,7 +424,6 @@ impl<E: LanguageExtractor + Send + 'static> SyntaxMeshMcp<E> {
         Ok(NodeId(StableId(bytes)))
     }
 
-    #[cfg(feature = "inference-sqlite")]
     fn parse_generation_id(value: &str) -> Result<GenerationId, McpError> {
         let bytes = hex::decode(value)
             .map_err(|error| Self::input_error(format!("invalid generation ID: {error}")))?;
@@ -377,6 +434,49 @@ impl<E: LanguageExtractor + Send + 'static> SyntaxMeshMcp<E> {
             ))
         })?;
         Ok(GenerationId(StableId(bytes)))
+    }
+
+    fn parse_contract_relation(
+        args: ContractRelationArgs,
+    ) -> Result<syntaxmesh_core::RelationKind, McpError> {
+        use syntaxmesh_core::RelationKind;
+        let no_external_fields = args.namespace.is_none() && args.relation.is_none();
+        match args.kind.as_str() {
+            "defines" if no_external_fields => Ok(RelationKind::Defines),
+            "imports" if no_external_fields => Ok(RelationKind::Imports),
+            "references" if no_external_fields => Ok(RelationKind::References),
+            "calls" if no_external_fields => Ok(RelationKind::Calls),
+            "implements" if no_external_fields => Ok(RelationKind::Implements),
+            "resolves_to" if no_external_fields => Ok(RelationKind::ResolvesTo),
+            "exports" if no_external_fields => Ok(RelationKind::Exports),
+            "has_resolution_diagnostic" if no_external_fields => {
+                Ok(RelationKind::HasResolutionDiagnostic)
+            }
+            "contains" if no_external_fields => Ok(RelationKind::Contains),
+            "external" => {
+                let namespace = args
+                    .namespace
+                    .ok_or_else(|| Self::input_error("external relation requires a namespace"))?;
+                let relation = args.relation.ok_or_else(|| {
+                    Self::input_error("external relation requires a relation name")
+                })?;
+                if namespace.trim().is_empty()
+                    || relation.trim().is_empty()
+                    || namespace.len() > 128
+                    || relation.len() > 128
+                    || namespace == "core"
+                {
+                    return Err(Self::input_error("invalid external relation identity"));
+                }
+                Ok(RelationKind::External {
+                    namespace,
+                    relation,
+                })
+            }
+            _ => Err(Self::input_error(
+                "unknown relation kind or unexpected relation fields",
+            )),
+        }
     }
 
     fn ensure_selected_scope(
@@ -697,6 +797,126 @@ impl<E: LanguageExtractor + Send + 'static> SyntaxMeshMcp<E> {
                     .map_err(|error| error.to_string())
             }?;
             serde_json::to_value(pack).map_err(|error| format!("encode context pack: {error}"))
+        })
+        .await
+        .and_then(|value| Self::result(&value))
+    }
+
+    #[tool(
+        description = "Evaluate up to 32 explicit required/forbidden relation contracts against a pinned current or retained graph generation. Missing relation evidence is reported as insufficient, never as proof."
+    )]
+    async fn evaluate_contracts(
+        &self,
+        Parameters(args): Parameters<EvaluateContractsArgs>,
+    ) -> Result<CallToolResult, McpError> {
+        if args.schema_version != 1 {
+            return Err(Self::input_error(
+                "unsupported contract evaluation schema_version",
+            ));
+        }
+        if args.contracts.is_empty() || args.contracts.len() > 32 {
+            return Err(Self::input_error(
+                "contracts must contain between 1 and 32 items",
+            ));
+        }
+        let selected = args
+            .generation
+            .as_deref()
+            .map(Self::parse_generation_id)
+            .transpose()?;
+        let history_scan_budget = usize::try_from(args.history_scan_budget.unwrap_or(10_000))
+            .map_err(|error| Self::input_error(format!("invalid history scan budget: {error}")))?;
+        let input_byte_budget = usize::try_from(args.input_byte_budget.unwrap_or(1_048_576))
+            .map_err(|error| Self::input_error(format!("invalid input byte budget: {error}")))?;
+        let edge_visit_budget = usize::try_from(args.edge_visit_budget.unwrap_or(100_000))
+            .map_err(|error| Self::input_error(format!("invalid edge visit budget: {error}")))?;
+        if !(1..=100_000).contains(&history_scan_budget)
+            || !(1..=4_194_304).contains(&input_byte_budget)
+            || !(1..=1_000_000).contains(&edge_visit_budget)
+        {
+            return Err(Self::input_error(
+                "contract evaluation budget exceeds host bounds",
+            ));
+        }
+        let contracts = args
+            .contracts
+            .into_iter()
+            .map(|item| {
+                if item.id.trim().is_empty()
+                    || item.id.len() > 128
+                    || item.version.trim().is_empty()
+                    || item.version.len() > 64
+                    || item.source.len() != 64
+                    || item.target.len() != 64
+                    || item.relation.kind.len() > 32
+                {
+                    return Err(Self::input_error(
+                        "invalid contract identity or node ID length",
+                    ));
+                }
+                Ok(Contract {
+                    id: item.id,
+                    version: item.version,
+                    origin: ContractOrigin::Declared,
+                    source: Self::parse_node_id(&item.source)?,
+                    target: Self::parse_node_id(&item.target)?,
+                    relation: Self::parse_contract_relation(item.relation)?,
+                    expectation: match item.expectation {
+                        ContractExpectationArgs::Required => RelationExpectation::Required,
+                        ContractExpectationArgs::Forbidden => RelationExpectation::Forbidden,
+                    },
+                })
+            })
+            .collect::<Result<Vec<_>, McpError>>()?;
+        let limits = ContractLimits {
+            contracts: 32,
+            input_bytes: input_byte_budget,
+            edge_visits: edge_visit_budget,
+            results: 32,
+        };
+        self.with_selected_query(selected, move |query| {
+            let generation = query.generation();
+            let evaluations = query
+                .evaluate_contracts(&contracts, &limits, history_scan_budget)
+                .map_err(|error| error.to_string())?
+                .into_iter()
+                .map(|evaluation| {
+                    let evidence = evaluation.evidence.map(|version| {
+                        let (fact_kind, fact_id) = match version.fact {
+                            syntaxmesh_core::FactRef::Edge(id) => ("edge", id.0.to_hex()),
+                            syntaxmesh_core::FactRef::File(id) => ("file", id.0.to_hex()),
+                            syntaxmesh_core::FactRef::Node(id) => ("node", id.0.to_hex()),
+                            syntaxmesh_core::FactRef::Provenance(id) => {
+                                ("provenance", id.0.to_hex())
+                            }
+                        };
+                        json!({
+                            "fact_kind": fact_kind,
+                            "fact_id": fact_id,
+                            "valid_from": version.valid_from.0.to_hex(),
+                        })
+                    });
+                    let outcome = match evaluation.outcome {
+                        ContractOutcome::Supported => "supported",
+                        ContractOutcome::Contradicted => "contradicted",
+                        ContractOutcome::InsufficientEvidence => "insufficient_evidence",
+                    };
+                    json!({
+                        "id": evaluation.id.to_hex(),
+                        "contract_id": evaluation.contract_id,
+                        "contract_version": evaluation.contract_version,
+                        "origin": "declared",
+                        "generation": evaluation.generation.0.to_hex(),
+                        "outcome": outcome,
+                        "evidence": evidence,
+                    })
+                })
+                .collect::<Vec<_>>();
+            Ok(json!({
+                "schema_version": 1,
+                "generation": generation.0.to_hex(),
+                "evaluations": evaluations,
+            }))
         })
         .await
         .and_then(|value| Self::result(&value))

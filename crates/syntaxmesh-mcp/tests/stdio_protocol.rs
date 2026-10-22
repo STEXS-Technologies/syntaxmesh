@@ -161,6 +161,23 @@ fn exercise_stdio(source_content: bool, lexical_first: bool) -> Result<(), Box<d
             "jsonrpc": "2.0", "id": 6, "method": "tools/call",
             "params": {"name":"context", "arguments":{"query":"caller", "token_budget":8192, "generation":previous.0.to_hex()}}
         }),
+        json!({
+            "jsonrpc": "2.0", "id": 7, "method": "tools/call",
+            "params": {
+                "name": "evaluate_contracts",
+                "arguments": {
+                    "schema_version": 1,
+                    "contracts": [{
+                        "id": "wire-check",
+                        "version": "1",
+                        "source": "0000000000000000000000000000000000000000000000000000000000000000",
+                        "target": "0000000000000000000000000000000000000000000000000000000000000000",
+                        "relation": {"kind": "not_a_relation"},
+                        "expectation": "required"
+                    }]
+                }
+            }
+        }),
     ];
     {
         let stdin = child
@@ -215,6 +232,7 @@ fn exercise_stdio(source_content: bool, lexical_first: bool) -> Result<(), Box<d
     if names
         != [
             "context",
+            "evaluate_contracts",
             "inference_checkpoint",
             "inference_claims_page",
             "neighbors",
@@ -243,6 +261,15 @@ fn exercise_stdio(source_content: bool, lexical_first: bool) -> Result<(), Box<d
         return Err(
             std::io::Error::other(format!("unexpected bounded search result: {search}")).into(),
         );
+    }
+
+    let rejected_contract =
+        response(7).ok_or_else(|| std::io::Error::other("missing contract tool response"))?;
+    if !rejected_contract.get("error").is_some_and(Value::is_object) {
+        return Err(std::io::Error::other(format!(
+            "stdio contract tool did not reject an unknown relation: {rejected_contract}"
+        ))
+        .into());
     }
     let context_called =
         response(4).ok_or_else(|| std::io::Error::other("missing MCP context call response"))?;

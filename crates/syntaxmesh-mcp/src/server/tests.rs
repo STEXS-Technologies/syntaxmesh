@@ -14,7 +14,10 @@ use syntaxmesh_query::ContextSourceProvider;
 use syntaxmesh_scanner::{SUPPORTED_SOURCE_EXTENSIONS, scan};
 use syntaxmesh_store_turso::TursoGraphStore;
 
-use super::{ContextArgs, NodeArgs, SearchArgs, SyntaxMeshMcp};
+use super::{
+    ContextArgs, ContractExpectationArgs, ContractItemArgs, ContractRelationArgs,
+    EvaluateContractsArgs, NodeArgs, SearchArgs, SyntaxMeshMcp,
+};
 use syntaxmesh_core::FileVersion;
 
 #[path = "corpus_probe/tests.rs"]
@@ -347,6 +350,7 @@ fn tool_discovery_exposes_only_read_tools() {
         names,
         [
             "context",
+            "evaluate_contracts",
             "inference_checkpoint",
             "inference_claims_page",
             "neighbors",
@@ -356,6 +360,95 @@ fn tool_discovery_exposes_only_read_tools() {
             "status"
         ]
     );
+}
+
+#[test]
+fn evaluate_contracts_tool_returns_pinned_evidence_and_uncertainty() -> Result<(), Box<dyn Error>> {
+    let (_fixture, server, generation) = indexed_server()?;
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()?;
+    let (source, target) = runtime.block_on(server.with_query(|query| {
+        let callers = query
+            .search("caller", 32)
+            .map_err(|error| error.to_string())?;
+        for caller in callers {
+            for (edge, neighbor) in query
+                .neighbors(caller.id)
+                .map_err(|error| error.to_string())?
+            {
+                if edge.relation == syntaxmesh_core::RelationKind::Calls {
+                    return Ok((caller.id, neighbor.id));
+                }
+            }
+        }
+        Err("indexed fixture did not contain a resolved call edge".to_owned())
+    }))?;
+    let result =
+        runtime.block_on(server.evaluate_contracts(Parameters(EvaluateContractsArgs {
+            schema_version: 1,
+            generation: Some(generation.0.to_hex()),
+            contracts: vec![
+                ContractItemArgs {
+                    id: "call-required".to_owned(),
+                    version: "1".to_owned(),
+                    source: source.0.to_hex(),
+                    target: target.0.to_hex(),
+                    relation: ContractRelationArgs {
+                        kind: "calls".to_owned(),
+                        namespace: None,
+                        relation: None,
+                    },
+                    expectation: ContractExpectationArgs::Required,
+                },
+                ContractItemArgs {
+                    id: "reverse-call-forbidden".to_owned(),
+                    version: "1".to_owned(),
+                    source: target.0.to_hex(),
+                    target: source.0.to_hex(),
+                    relation: ContractRelationArgs {
+                        kind: "calls".to_owned(),
+                        namespace: None,
+                        relation: None,
+                    },
+                    expectation: ContractExpectationArgs::Forbidden,
+                },
+            ],
+            history_scan_budget: Some(10_000),
+            input_byte_budget: Some(1_048_576),
+            edge_visit_budget: Some(100_000),
+        })))?;
+    let value = content_json(&result)?;
+    let evaluations = value
+        .get("evaluations")
+        .and_then(Value::as_array)
+        .ok_or("contract tool did not return evaluations")?;
+    let by_id = evaluations
+        .iter()
+        .filter_map(|item| {
+            Some((
+                item.get("contract_id")?.as_str()?,
+                (item.get("outcome")?.as_str()?, item.get("evidence")?),
+            ))
+        })
+        .collect::<std::collections::BTreeMap<_, _>>();
+    if value.get("schema_version").and_then(Value::as_u64) != Some(1)
+        || value.get("generation").and_then(Value::as_str) != Some(generation.0.to_hex().as_str())
+        || by_id
+            .get("call-required")
+            .map(|(outcome, _evidence)| *outcome)
+            != Some("supported")
+        || by_id
+            .get("call-required")
+            .is_none_or(|(_outcome, evidence)| !evidence.is_object())
+        || by_id
+            .get("reverse-call-forbidden")
+            .map(|(outcome, _)| *outcome)
+            != Some("insufficient_evidence")
+    {
+        return Err(std::io::Error::other(format!("unexpected contract response: {value}")).into());
+    }
+    Ok(())
 }
 
 #[test]

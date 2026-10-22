@@ -25,10 +25,11 @@ syntaxmesh-api-model.workspace = true
 syntaxmesh-core.workspace = true
 syntaxmesh-context-host.workspace = true
 syntaxmesh-engine.workspace = true
+syntaxmesh-inference.workspace = true
 syntaxmesh-inference-host = { workspace = true, optional = true }
 syntaxmesh-lang-rust.workspace = true
 syntaxmesh-language-sdk.workspace = true
-syntaxmesh-query.workspace = true
+syntaxmesh-query = { workspace = true, features = ["inference"] }
 syntaxmesh-store-turso.workspace = true
 tokio.workspace = true
 

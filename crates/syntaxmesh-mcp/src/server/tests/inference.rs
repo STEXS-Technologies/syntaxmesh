@@ -1,5 +1,6 @@
 use super::super::{
-    InferenceCheckpointArgs, InferenceCursorArgs, InferencePageArgs, SyntaxMeshMcp,
+    ContractHistoryArgs, InferenceCheckpointArgs, InferenceCursorArgs, InferencePageArgs,
+    SyntaxMeshMcp,
 };
 use super::{Fixture, content_json};
 use rmcp::handler::server::wrapper::Parameters;
@@ -11,9 +12,11 @@ use syntaxmesh_core::{
     Provenance, ProvenanceId, RelationKind, RepositoryId, StableId, WorktreeId,
 };
 use syntaxmesh_engine::SyntaxMeshEngine;
-use syntaxmesh_inference::{Limits, Rule};
+use syntaxmesh_inference::{
+    Contract, ContractLimits, ContractOrigin, Limits, RelationExpectation, Rule,
+};
 use syntaxmesh_inference_host::InferenceReadBindings;
-use syntaxmesh_inference_sqlite::{InferenceMaterializer, RebuildRequest};
+use syntaxmesh_inference_sqlite::{ContractHistoryRequest, InferenceMaterializer, RebuildRequest};
 use syntaxmesh_lang_rust::RustExtractor;
 use syntaxmesh_store::GraphStore;
 use syntaxmesh_store_turso::TursoGraphStore;
@@ -113,6 +116,21 @@ fn mcp_inference_tools_serve_retained_checkpoint_and_claim_page()
         ..first_rule.clone()
     };
     let rules = [first_rule, second_rule];
+    let contracts = [Contract {
+        id: "example:writer_uses_target".to_owned(),
+        version: "1".to_owned(),
+        origin: ContractOrigin::Declared,
+        source: writer,
+        target,
+        relation: external("writes"),
+        expectation: RelationExpectation::Required,
+    }];
+    let contract_limits = ContractLimits {
+        contracts: 4,
+        input_bytes: 16_384,
+        edge_visits: 100,
+        results: 4,
+    };
     let limits = Limits {
         input_bytes: 16_384,
         facts: 20,
@@ -133,6 +151,21 @@ fn mcp_inference_tools_serve_retained_checkpoint_and_claim_page()
     let origin = engine.initialize_inference_stream(&inference_database, &rebuild, 4096)?;
     drop(engine);
 
+    let history_store = TursoGraphStore::open(&canonical_database)?;
+    let mut materializer = InferenceMaterializer::open(&inference_database)?;
+    for generation_to_retain in [first, generation] {
+        materializer.retain_contract_history(
+            &history_store,
+            &ContractHistoryRequest {
+                generation: generation_to_retain,
+                contracts: &contracts,
+                limits: &contract_limits,
+                history_scan_budget: 100,
+                output_bytes: 16_384,
+            },
+        )?;
+    }
+
     let page_limits = syntaxmesh_api_model::InferencePageLimits {
         claims: 1,
         payload_bytes: 16_384,
@@ -140,7 +173,7 @@ fn mcp_inference_tools_serve_retained_checkpoint_and_claim_page()
         tree_pages: 4096,
     };
     let mut bindings = InferenceReadBindings::new(repository, worktree, page_limits)?;
-    bindings.insert("rules".to_owned(), inference_database, origin)?;
+    bindings.insert("rules".to_owned(), inference_database.clone(), origin)?;
     let server =
         SyntaxMeshMcp::open(&canonical_database, &root, "cl100k_base")?.with_inference(bindings)?;
     let runtime = tokio::runtime::Builder::new_multi_thread()
@@ -164,6 +197,101 @@ fn mcp_inference_tools_serve_retained_checkpoint_and_claim_page()
         || retained.active_claims != 2
     {
         return Err("MCP checkpoint differs from retained generation".into());
+    }
+
+    let history_first =
+        runtime.block_on(server.contract_history(Parameters(ContractHistoryArgs {
+            schema_version: INFERENCE_READ_SCHEMA_VERSION,
+            binding: "rules".to_owned(),
+            contract_id: "example:writer_uses_target".to_owned(),
+            contract_version: "1".to_owned(),
+            after_generation: None,
+            after_sequence: None,
+            limit: Some(1),
+        })))?;
+    let first_history: serde_json::Value = content_json(&history_first)?;
+    let first_item = first_history
+        .get("items")
+        .and_then(serde_json::Value::as_array)
+        .and_then(|items| items.first())
+        .ok_or("MCP retained contract history page is empty")?;
+    let first_evaluation = first_item
+        .get("evaluation")
+        .ok_or("MCP retained contract evaluation is missing")?;
+    let history_cursor = first_history
+        .get("next_cursor")
+        .filter(|cursor| !cursor.is_null())
+        .ok_or("MCP retained contract history cursor is missing")?;
+    let first_generation_hex = first.0.to_hex();
+    if first_history
+        .get("binding")
+        .and_then(serde_json::Value::as_str)
+        != Some("rules")
+        || first_history
+            .get("schema_version")
+            .and_then(serde_json::Value::as_u64)
+            != Some(1)
+        || first_evaluation
+            .get("generation")
+            .and_then(serde_json::Value::as_str)
+            != Some(first_generation_hex.as_str())
+        || first_evaluation
+            .get("outcome")
+            .and_then(serde_json::Value::as_str)
+            != Some("insufficient_evidence")
+    {
+        return Err(format!(
+            "MCP contract history did not return the retained first generation: {first_history}"
+        )
+        .into());
+    }
+    let database_before_history_read = std::fs::read(&inference_database)?;
+    let history_next = runtime.block_on(
+        server.contract_history(Parameters(ContractHistoryArgs {
+            schema_version: INFERENCE_READ_SCHEMA_VERSION,
+            binding: "rules".to_owned(),
+            contract_id: "example:writer_uses_target".to_owned(),
+            contract_version: "1".to_owned(),
+            after_generation: Some(
+                history_cursor
+                    .get("generation")
+                    .and_then(serde_json::Value::as_str)
+                    .ok_or("contract history cursor generation missing")?
+                    .to_owned(),
+            ),
+            after_sequence: Some(
+                history_cursor
+                    .get("generation_sequence")
+                    .and_then(serde_json::Value::as_u64)
+                    .ok_or("contract history cursor sequence missing")?,
+            ),
+            limit: Some(1),
+        })),
+    )?;
+    let next_history: serde_json::Value = content_json(&history_next)?;
+    let next_item = next_history
+        .get("items")
+        .and_then(serde_json::Value::as_array)
+        .and_then(|items| items.first())
+        .ok_or("MCP retained contract history continuation is empty")?;
+    let next_evaluation = next_item
+        .get("evaluation")
+        .ok_or("MCP retained continuation evaluation is missing")?;
+    let next_generation_hex = generation.0.to_hex();
+    if next_evaluation
+        .get("generation")
+        .and_then(serde_json::Value::as_str)
+        != Some(next_generation_hex.as_str())
+        || next_evaluation
+            .get("outcome")
+            .and_then(serde_json::Value::as_str)
+            != Some("supported")
+        || !next_history
+            .get("next_cursor")
+            .is_some_and(serde_json::Value::is_null)
+        || std::fs::read(&inference_database)? != database_before_history_read
+    {
+        return Err("MCP contract history continuation changed or mutated retained results".into());
     }
 
     let first_page_result =

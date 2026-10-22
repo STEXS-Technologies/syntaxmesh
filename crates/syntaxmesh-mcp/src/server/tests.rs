@@ -350,6 +350,7 @@ fn tool_discovery_exposes_only_read_tools() {
         names,
         [
             "context",
+            "contract_history",
             "evaluate_contracts",
             "inference_checkpoint",
             "inference_claims_page",

@@ -3,5 +3,6 @@
 mod admission;
 mod conversion;
 
-pub use admission::{AdmittedInferencePage, InferenceReadBindings};
+pub use admission::{AdmittedContractHistory, AdmittedInferencePage, InferenceReadBindings};
 pub use conversion::{inference_checkpoint_record, inference_page_response};
+pub use syntaxmesh_inference_sqlite::ContractHistoryCursor;

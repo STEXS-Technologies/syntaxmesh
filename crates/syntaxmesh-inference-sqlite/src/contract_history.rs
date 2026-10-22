@@ -35,7 +35,7 @@ pub struct RetainedContractEvaluation {
 }
 
 /// Keyset cursor for one contract's chronological result history.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ContractHistoryCursor {
     pub repository: RepositoryId,
     pub worktree: WorktreeId,
@@ -57,7 +57,7 @@ pub struct ContractHistoryQuery {
 }
 
 /// Ordered page of materialized results; no canonical-history replay occurs.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ContractHistoryPage {
     pub items: Vec<RetainedContractEvaluation>,
     pub next_cursor: Option<ContractHistoryCursor>,

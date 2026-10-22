@@ -159,6 +159,25 @@ struct InferenceCheckpointArgs {
 
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
+struct ContractHistoryArgs {
+    schema_version: u32,
+    #[schemars(length(max = 128))]
+    binding: String,
+    #[schemars(length(min = 1, max = 128))]
+    contract_id: String,
+    #[schemars(length(min = 1, max = 64))]
+    contract_version: String,
+    /// Both cursor fields must be supplied together from the previous page.
+    #[schemars(length(max = 64))]
+    after_generation: Option<String>,
+    after_sequence: Option<u64>,
+    /// Maximum retained results (1–100, default 25).
+    #[schemars(range(min = 1, max = 100))]
+    limit: Option<u64>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 struct InferenceCursorArgs {
     #[schemars(length(max = 128))]
     binding: String,
@@ -1088,6 +1107,174 @@ impl<E: LanguageExtractor + Send + 'static> SyntaxMeshMcp<E> {
                     syntaxmesh_inference_host::inference_page_response(request.binding, page)?;
                 serde_json::to_value(response)
                     .map_err(|error| format!("encode inference page: {error}"))
+            })
+            .await
+            .and_then(|value| Self::result(&value))
+        }
+    }
+
+    #[tool(
+        description = "Read a bounded page of already-retained contract evaluations from an operator-configured inference binding. This tool never evaluates or materializes contracts."
+    )]
+    async fn contract_history(
+        &self,
+        Parameters(args): Parameters<ContractHistoryArgs>,
+    ) -> Result<CallToolResult, McpError> {
+        #[cfg(not(feature = "inference-sqlite"))]
+        {
+            let ContractHistoryArgs {
+                schema_version,
+                binding,
+                contract_id,
+                contract_version,
+                after_generation,
+                after_sequence,
+                limit,
+            } = args;
+            let _ = (
+                schema_version,
+                binding,
+                contract_id,
+                contract_version,
+                after_generation,
+                after_sequence,
+                limit,
+            );
+            return Err(Self::tool_error(
+                "retained contract history is not enabled in this build",
+            ));
+        }
+        #[cfg(feature = "inference-sqlite")]
+        {
+            if args.schema_version != syntaxmesh_api_model::INFERENCE_READ_SCHEMA_VERSION {
+                return Err(Self::input_error(
+                    "unsupported contract history schema_version",
+                ));
+            }
+            let after = match (args.after_generation, args.after_sequence) {
+                (None, None) => None,
+                (Some(generation), Some(generation_sequence)) => {
+                    let (repository, worktree) = self
+                        .inference
+                        .as_ref()
+                        .ok_or_else(|| Self::tool_error("inference reads are not configured"))?
+                        .scope();
+                    Some(syntaxmesh_inference_host::ContractHistoryCursor {
+                        repository,
+                        worktree,
+                        contract_id: args.contract_id.clone(),
+                        contract_version: args.contract_version.clone(),
+                        generation_sequence,
+                        generation: Self::parse_generation_id(&generation)?,
+                    })
+                }
+                _ => {
+                    return Err(Self::input_error(
+                        "after_generation and after_sequence must be supplied together",
+                    ));
+                }
+            };
+            let bindings = self
+                .inference
+                .as_ref()
+                .ok_or_else(|| Self::tool_error("inference reads are not configured"))?;
+            let admitted = bindings
+                .contract_history(
+                    args.schema_version,
+                    &args.binding,
+                    args.contract_id,
+                    args.contract_version,
+                    after,
+                    usize::try_from(args.limit.unwrap_or(25)).map_err(|error| {
+                        Self::input_error(format!("invalid page limit: {error}"))
+                    })?,
+                )
+                .map_err(Self::input_error)?;
+            let permit = Arc::clone(&self.inference_admission)
+                .try_acquire_owned()
+                .map_err(|_error| Self::tool_error("inference read capacity is busy"))?;
+            let database = admitted.database.to_path_buf();
+            let query = admitted.query;
+            let binding = args.binding;
+            self.with_engine(move |engine| {
+                let _permit = permit;
+                let page = engine
+                    .contract_history(database, &query)
+                    .map_err(|error| error.to_string())?;
+                let items = page
+                    .items
+                    .into_iter()
+                    .map(|item| {
+                        let contract = item.contract;
+                        let evaluation = item.evaluation;
+                        let origin = match contract.origin {
+                            ContractOrigin::SourceDerived => "source_derived",
+                            ContractOrigin::SchemaDerived => "schema_derived",
+                            ContractOrigin::ConfigDerived => "config_derived",
+                            ContractOrigin::Declared => "declared",
+                            ContractOrigin::Documented => "documented",
+                            ContractOrigin::RuntimeInferred => "runtime_inferred",
+                            ContractOrigin::ModelSuggested => "model_suggested",
+                        };
+                        let expectation = match contract.expectation {
+                            RelationExpectation::Required => "required",
+                            RelationExpectation::Forbidden => "forbidden",
+                        };
+                        let outcome = match evaluation.outcome {
+                            ContractOutcome::Supported => "supported",
+                            ContractOutcome::Contradicted => "contradicted",
+                            ContractOutcome::InsufficientEvidence => "insufficient_evidence",
+                        };
+                        let evidence = evaluation.evidence.map(|version| {
+                            let (fact_kind, fact_id) = match version.fact {
+                                syntaxmesh_core::FactRef::Edge(id) => ("edge", id.0.to_hex()),
+                                syntaxmesh_core::FactRef::File(id) => ("file", id.0.to_hex()),
+                                syntaxmesh_core::FactRef::Node(id) => ("node", id.0.to_hex()),
+                                syntaxmesh_core::FactRef::Provenance(id) => {
+                                    ("provenance", id.0.to_hex())
+                                }
+                            };
+                            json!({
+                                "fact_kind": fact_kind,
+                                "fact_id": fact_id,
+                                "valid_from": version.valid_from.0.to_hex(),
+                            })
+                        });
+                        json!({
+                            "contract": {
+                                "id": contract.id,
+                                "version": contract.version,
+                                "origin": origin,
+                                "source": contract.source.0.to_hex(),
+                                "target": contract.target.0.to_hex(),
+                                "relation": contract.relation,
+                                "expectation": expectation,
+                            },
+                            "evaluation": {
+                                "id": evaluation.id.to_hex(),
+                                "contract_id": evaluation.contract_id,
+                                "contract_version": evaluation.contract_version,
+                                "origin": origin,
+                                "generation": evaluation.generation.0.to_hex(),
+                                "outcome": outcome,
+                                "evidence": evidence,
+                            },
+                            "generation_sequence": item.generation_sequence,
+                        })
+                    })
+                    .collect::<Vec<_>>();
+                let next_cursor = page.next_cursor.map(|cursor| {
+                    json!({
+                        "generation_sequence": cursor.generation_sequence,
+                        "generation": cursor.generation.0.to_hex(),
+                    })
+                });
+                Ok(json!({
+                    "schema_version": 1,
+                    "binding": binding,
+                    "items": items,
+                    "next_cursor": next_cursor,
+                }))
             })
             .await
             .and_then(|value| Self::result(&value))

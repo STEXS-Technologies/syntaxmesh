@@ -5,7 +5,9 @@ use syntaxmesh_api_model::{
     InferencePageRequest,
 };
 use syntaxmesh_core::{GenerationId, RepositoryId, WorktreeId};
-use syntaxmesh_inference_sqlite::{StreamCursor, StreamOrigin, StreamPageRequest};
+use syntaxmesh_inference_sqlite::{
+    ContractHistoryCursor, ContractHistoryQuery, StreamCursor, StreamOrigin, StreamPageRequest,
+};
 
 #[derive(Clone)]
 struct Binding {
@@ -26,6 +28,12 @@ pub struct InferenceReadBindings {
 pub struct AdmittedInferencePage<'bindings> {
     pub database: &'bindings Path,
     pub request: StreamPageRequest,
+}
+
+/// Storage-aware, operator-scoped retained contract history request.
+pub struct AdmittedContractHistory<'bindings> {
+    pub database: &'bindings Path,
+    pub query: ContractHistoryQuery,
 }
 
 impl InferenceReadBindings {
@@ -139,6 +147,46 @@ impl InferenceReadBindings {
         })
     }
 
+    /// Bind retained contract history to one installed operator database and scope.
+    ///
+    /// # Errors
+    /// Rejects unsupported schema, unknown binding, invalid identifiers, bounds,
+    /// or a cursor that attempts to substitute host scope or contract identity.
+    pub fn contract_history(
+        &self,
+        schema_version: u32,
+        identifier: &str,
+        contract_id: String,
+        contract_version: String,
+        after: Option<ContractHistoryCursor>,
+        limit: usize,
+    ) -> Result<AdmittedContractHistory<'_>, String> {
+        let binding = self.binding(schema_version, identifier)?;
+        valid_contract_identity(&contract_id, &contract_version)?;
+        if !(1..=100).contains(&limit) {
+            return Err("contract history page limit outside host policy".to_owned());
+        }
+        if after.as_ref().is_some_and(|cursor| {
+            cursor.repository != self.repository
+                || cursor.worktree != self.worktree
+                || cursor.contract_id != contract_id
+                || cursor.contract_version != contract_version
+        }) {
+            return Err("contract history cursor scope substitution".to_owned());
+        }
+        Ok(AdmittedContractHistory {
+            database: &binding.database,
+            query: ContractHistoryQuery {
+                repository: self.repository,
+                worktree: self.worktree,
+                contract_id,
+                contract_version,
+                after,
+                limit,
+            },
+        })
+    }
+
     fn binding(&self, version: u32, identifier: &str) -> Result<&Binding, String> {
         if version != INFERENCE_READ_SCHEMA_VERSION {
             return Err("unsupported inference read schema".to_owned());
@@ -148,6 +196,13 @@ impl InferenceReadBindings {
             .get(identifier)
             .ok_or_else(|| "unknown inference binding".to_owned())
     }
+}
+
+fn valid_contract_identity(id: &str, version: &str) -> Result<(), String> {
+    if id.trim().is_empty() || id.len() > 128 || version.trim().is_empty() || version.len() > 64 {
+        return Err("invalid contract identity".to_owned());
+    }
+    Ok(())
 }
 
 pub(crate) fn valid_identifier(identifier: &str) -> Result<(), String> {

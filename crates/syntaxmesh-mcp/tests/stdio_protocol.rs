@@ -232,6 +232,7 @@ fn exercise_stdio(source_content: bool, lexical_first: bool) -> Result<(), Box<d
     if names
         != [
             "context",
+            "contract_history",
             "evaluate_contracts",
             "inference_checkpoint",
             "inference_claims_page",

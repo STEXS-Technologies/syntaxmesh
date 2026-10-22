@@ -132,6 +132,65 @@ fn rejects_unknown_version_binding_and_each_invalid_budget() -> Result<(), Strin
 }
 
 #[test]
+fn contract_history_admission_binds_operator_scope_and_rejects_cursor_substitution()
+-> Result<(), String> {
+    let registry = registry()?;
+    let admitted = registry.contract_history(
+        INFERENCE_READ_SCHEMA_VERSION,
+        "rules",
+        "architecture:writer_target".to_owned(),
+        "2".to_owned(),
+        None,
+        25,
+    )?;
+    if admitted.database != Path::new("not-opened.sqlite")
+        || admitted.query.repository != origin().baseline.selection.repository
+        || admitted.query.worktree != origin().baseline.selection.worktree
+        || admitted.query.limit != 25
+    {
+        return Err("contract history admission lost operator scope or page limit".to_owned());
+    }
+    let selection = origin().baseline.selection;
+    let substituted = ContractHistoryCursor {
+        repository: RepositoryId::derive(&[b"foreign-repository"]),
+        worktree: selection.worktree,
+        contract_id: "architecture:writer_target".to_owned(),
+        contract_version: "2".to_owned(),
+        generation_sequence: 1,
+        generation: selection.generation,
+    };
+    if registry
+        .contract_history(
+            INFERENCE_READ_SCHEMA_VERSION,
+            "rules",
+            "architecture:writer_target".to_owned(),
+            "2".to_owned(),
+            Some(substituted),
+            25,
+        )
+        .is_ok()
+    {
+        return Err("foreign contract history cursor was admitted".to_owned());
+    }
+    for limit in [0, 101] {
+        if registry
+            .contract_history(
+                INFERENCE_READ_SCHEMA_VERSION,
+                "rules",
+                "architecture:writer_target".to_owned(),
+                "2".to_owned(),
+                None,
+                limit,
+            )
+            .is_ok()
+        {
+            return Err("out-of-policy contract history limit admitted".to_owned());
+        }
+    }
+    Ok(())
+}
+
+#[test]
 fn rejects_cross_alias_cursor_and_foreign_operator_scope() -> Result<(), String> {
     let mut registry = registry()?;
     let mut page = request();

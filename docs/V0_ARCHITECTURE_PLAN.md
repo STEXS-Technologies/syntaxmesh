@@ -212,6 +212,21 @@ paths were then exercised explicitly; strict Clippy passed on the downstream
 SQLite, Penelope, and Engine packages. The StateChronicle differential fixture
 also passes under the `inference-sqlite` feature.
 
+[ADR-0381](adr/0381-mcp-retained-contract-history.md) makes already-materialized
+contract results readable through a bounded, read-only MCP tool. An
+operator-installed inference binding supplies the database and repository scope;
+clients page by a generation/sequence cursor that is checked against the retained
+contract identity. The tool returns normalized hex identities and outcome labels,
+does not evaluate or replay the graph, and leaves the downstream database
+unchanged. Feature-enabled MCP pagination/serialization and operator-scope
+admission tests pass, as do tool discovery and stdio protocol checks. This closes
+the MCP read-delivery gap for retained contract results, not authored-contract
+management, automatic successor evaluation, drift summaries, or v2/v5.
+Full `cargo make ci` passed in 181.76 seconds on 2026-10-22, including
+architecture and migration registries, workspace checks, strict Clippy,
+security/dependency gates, tests, and API docs; the opt-in DuckDB adapter was
+excluded as intended.
+
 After this retrieval and target-discovery change, `cargo make ci` passed in
 184.40 seconds on 2026-10-22. It covered workspace formatting, architecture,
 extension isolation, migration registries, instrumented/default checks, audit

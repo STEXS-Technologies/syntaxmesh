@@ -1,16 +1,17 @@
 use super::{EngineError, SyntaxMeshEngine};
 use std::path::Path;
-use syntaxmesh_inference::{OntologyDefinition, RegisteredInferenceAdmission};
+use syntaxmesh_inference::{ContractLimits, OntologyDefinition, RegisteredInferenceAdmission};
 use syntaxmesh_inference_sqlite::{
     ContractHistoryPage, ContractHistoryQuery, ContractHistoryWatermark, InferenceMaterializer,
-    RebuildRequest, RetainedContractEvaluation, StreamCheckpoint, StreamOrigin, StreamSyncRequest,
+    RebuildRequest, RetainedContractEvaluation, RetainedContractSet, StreamCheckpoint,
+    StreamOrigin, StreamSyncRequest,
 };
 use syntaxmesh_integration_penelope::{
-    ContractHistoryRequest, PenelopeInferenceMaterializer, PenelopeInferenceSetup,
-    PenelopeInferenceStream,
+    ContractHistoryRequest as PenelopeContractHistoryRequest, PenelopeInferenceMaterializer,
+    PenelopeInferenceSetup, PenelopeInferenceStream,
 };
 use syntaxmesh_language_sdk::LanguageExtractor;
-use syntaxmesh_store::{DurableRecordStore, GraphStore};
+use syntaxmesh_store::{DurableRecordStore, GraphStore, StoreError};
 use syntaxmesh_workflow::WorkflowError;
 
 /// Effects recovered in dependency order; not canonical publication counts.
@@ -20,6 +21,28 @@ pub struct InferenceRecovery {
     pub baselines: usize,
     pub setups: usize,
     pub stream_effects: usize,
+}
+
+/// Bounds for catch-up of the latest retained contract set over later generations.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ContractHistoryAdvanceRequest {
+    pub through_generation: syntaxmesh_core::GenerationId,
+    pub generation_budget: usize,
+    pub history_scan_budget: usize,
+    pub output_bytes_per_generation: usize,
+    pub limits: ContractLimits,
+}
+
+/// Summary of an explicit, bounded contract-history catch-up operation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ContractHistoryAdvanceReceipt {
+    pub starting_generation: syntaxmesh_core::GenerationId,
+    pub through_generation: syntaxmesh_core::GenerationId,
+    pub starting_sequence: u64,
+    pub through_sequence: u64,
+    pub generations_advanced: usize,
+    pub contract_count: usize,
+    pub last_watermark: ContractHistoryWatermark,
 }
 
 impl<S: GraphStore + DurableRecordStore, E: LanguageExtractor> SyntaxMeshEngine<S, E> {
@@ -56,7 +79,7 @@ impl<S: GraphStore + DurableRecordStore, E: LanguageExtractor> SyntaxMeshEngine<
     pub fn retain_contract_history(
         &mut self,
         database: impl AsRef<Path>,
-        request: &ContractHistoryRequest<'_>,
+        request: &PenelopeContractHistoryRequest<'_>,
     ) -> Result<ContractHistoryWatermark, EngineError> {
         let manifest = self.indexer.store().manifest(request.generation)?;
         if manifest.repository != self.repository || manifest.worktree != self.worktree {
@@ -68,8 +91,170 @@ impl<S: GraphStore + DurableRecordStore, E: LanguageExtractor> SyntaxMeshEngine<
             .into());
         }
         self.recover_pending_workflows()?;
-        Ok(PenelopeInferenceMaterializer::new(self.indexer.store_mut())
-            .retain_contract_history(database, request)?)
+        Ok(
+            PenelopeInferenceMaterializer::new(self.indexer.store_mut()).retain_contract_history(
+                database,
+                &PenelopeContractHistoryRequest {
+                    generation: request.generation,
+                    contracts: request.contracts,
+                    limits: request.limits,
+                    history_scan_budget: request.history_scan_budget,
+                    output_bytes: request.output_bytes,
+                },
+            )?,
+        )
+    }
+
+    /// Catch the latest complete retained contract set up through one pinned
+    /// generation, journaling each immediate successor through Penelope.
+    ///
+    /// The latest retained declarations are reused; this operation does not
+    /// accept or infer replacements. It preflights the exact generation
+    /// distance before any new result is published, then leaves a durable
+    /// complete prefix if an individual generation fails.
+    ///
+    /// # Errors
+    /// Rejects missing/corrupt baselines, reverse or foreign ranges, invalid
+    /// bounds, noncontiguous history, or failed Penelope/SQLite effects.
+    pub fn advance_contract_history(
+        &mut self,
+        database: impl AsRef<Path>,
+        request: ContractHistoryAdvanceRequest,
+    ) -> Result<ContractHistoryAdvanceReceipt, EngineError> {
+        if request.generation_budget == 0
+            || request.generation_budget > 10_000
+            || request.history_scan_budget == 0
+            || request.output_bytes_per_generation == 0
+            || request.limits.contracts == 0
+            || request.limits.input_bytes == 0
+            || request.limits.edge_visits == 0
+            || request.limits.results == 0
+        {
+            return Err(invalid_contract_history_advance(
+                "positive bounded contract history limits required",
+            ));
+        }
+        let through_manifest = self.indexer.store().manifest(request.through_generation)?;
+        if through_manifest.repository != self.repository
+            || through_manifest.worktree != self.worktree
+        {
+            return Err(invalid_contract_history_advance(
+                "contract history catch-up target outside engine scope",
+            ));
+        }
+        self.recover_pending_workflows()?;
+        let _ = PenelopeInferenceMaterializer::new(self.indexer.store_mut())
+            .recover_contract_history_pending()?;
+        let database = database.as_ref();
+        let materializer = InferenceMaterializer::open(database)
+            .map_err(|error| WorkflowError::Verification(error.to_string()))?;
+        let retained = materializer
+            .latest_contract_set(self.repository, self.worktree)
+            .map_err(|error| WorkflowError::Verification(error.to_string()))?
+            .ok_or_else(|| {
+                invalid_contract_history_advance(
+                    "contract history catch-up requires an existing retained baseline",
+                )
+            })?;
+        drop(materializer);
+        let RetainedContractSet {
+            watermark: baseline,
+            contracts,
+        } = retained;
+        let through_sequence = self
+            .indexer
+            .store()
+            .generation_sequence(request.through_generation)?;
+        if baseline.generation_sequence > through_sequence {
+            return Err(invalid_contract_history_advance(
+                "contract history catch-up target precedes latest retained baseline",
+            ));
+        }
+        if contracts.is_empty()
+            || contracts.len() > request.limits.contracts
+            || contracts.len() > request.limits.results
+        {
+            return Err(invalid_contract_history_advance(
+                "retained contract set exceeds catch-up limits or is empty",
+            ));
+        }
+        let generation_distance = through_sequence
+            .checked_sub(baseline.generation_sequence)
+            .ok_or_else(|| {
+                invalid_contract_history_advance("contract generation range reversed")
+            })?;
+        let generation_distance = usize::try_from(generation_distance)
+            .map_err(|error| WorkflowError::Verification(error.to_string()))?;
+        if generation_distance > request.generation_budget {
+            return Err(invalid_contract_history_advance(
+                "contract history generation budget exhausted before publication",
+            ));
+        }
+        let mut previous_generation = baseline.generation;
+        let mut previous_sequence = baseline.generation_sequence;
+        let mut cursor = None;
+        let mut last_watermark = baseline;
+        for _ in 0..generation_distance {
+            let page = self.indexer.store().changes_between_page(
+                baseline.generation,
+                request.through_generation,
+                cursor,
+                1,
+            )?;
+            let change = page.items.first().ok_or_else(|| {
+                invalid_contract_history_advance("retained generation transition is missing")
+            })?;
+            let expected_sequence = previous_sequence
+                .checked_add(1)
+                .ok_or_else(|| invalid_contract_history_advance("generation sequence overflow"))?;
+            if page.items.len() != 1
+                || change.sequence != expected_sequence
+                || change.delta.expected_base != Some(previous_generation)
+                || change.manifest.parent != Some(previous_generation)
+                || change.delta.next_generation != change.manifest.generation
+                || change.manifest.repository != self.repository
+                || change.manifest.worktree != self.worktree
+                || self
+                    .indexer
+                    .store()
+                    .generation_sequence(change.manifest.generation)?
+                    != change.sequence
+            {
+                return Err(invalid_contract_history_advance(
+                    "contract history range contains a noncontiguous or foreign transition",
+                ));
+            }
+            last_watermark = PenelopeInferenceMaterializer::new(self.indexer.store_mut())
+                .retain_contract_history(
+                    database,
+                    &PenelopeContractHistoryRequest {
+                        generation: change.manifest.generation,
+                        contracts: &contracts,
+                        limits: &request.limits,
+                        history_scan_budget: request.history_scan_budget,
+                        output_bytes: request.output_bytes_per_generation,
+                    },
+                )?;
+            previous_generation = change.manifest.generation;
+            previous_sequence = change.sequence;
+            cursor = page.next_cursor;
+        }
+        if previous_generation != request.through_generation
+            || previous_sequence != through_sequence
+        {
+            return Err(invalid_contract_history_advance(
+                "contract history catch-up did not reach its pinned target",
+            ));
+        }
+        Ok(ContractHistoryAdvanceReceipt {
+            starting_generation: baseline.generation,
+            through_generation: request.through_generation,
+            starting_sequence: baseline.generation_sequence,
+            through_sequence,
+            generations_advanced: generation_distance,
+            contract_count: contracts.len(),
+            last_watermark,
+        })
     }
 
     /// Read one already-materialized exact contract result without replaying graph history.
@@ -253,6 +438,10 @@ impl<S: GraphStore + DurableRecordStore, E: LanguageExtractor> SyntaxMeshEngine<
             )?,
         )
     }
+}
+
+fn invalid_contract_history_advance(message: &str) -> EngineError {
+    WorkflowError::Store(StoreError::InvalidDelta(message.to_owned())).into()
 }
 
 #[cfg(test)]

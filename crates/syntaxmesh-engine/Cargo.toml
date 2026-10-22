@@ -29,6 +29,7 @@ syntaxmesh-store.workspace = true
 syntaxmesh-workflow.workspace = true
 
 [dev-dependencies]
+rusqlite = { version = "0.40.2", default-features = false, features = ["bundled"] }
 syntaxmesh-inference.workspace = true
 syntaxmesh-store-turso.workspace = true
 syntaxmesh-store-sqlite.workspace = true

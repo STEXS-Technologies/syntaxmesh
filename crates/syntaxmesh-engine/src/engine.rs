@@ -28,7 +28,9 @@ use syntaxmesh_workflow::{
 mod inference;
 mod integrity;
 #[cfg(feature = "inference-sqlite")]
-pub use inference::InferenceRecovery;
+pub use inference::{
+    ContractHistoryAdvanceReceipt, ContractHistoryAdvanceRequest, InferenceRecovery,
+};
 mod semantic;
 #[cfg(test)]
 mod tests;

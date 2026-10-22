@@ -227,6 +227,18 @@ architecture and migration registries, workspace checks, strict Clippy,
 security/dependency gates, tests, and API docs; the opt-in DuckDB adapter was
 excluded as intended.
 
+[ADR-0382](adr/0382-incremental-contract-history-advancement.md) adds explicit
+Engine and CLI catch-up: it integrity-checks the latest complete retained
+contract set and evaluates it over every immediate accepted successor to a
+pinned generation. Generation distance is preflight-bounded before new effects;
+each generation is independently journaled through Penelope, so a failure
+preserves a complete prefix and recovery resumes. The operation rejects
+ambiguous same-generation sets and does not replay from the original baseline.
+SQLite integrity, Engine interruption/recovery, idempotent no-op, and File/Turso
+CLI pagination/catch-up tests pass. This is caller-triggered catch-up, not
+publication-time scheduling or authored-contract lifecycle; drift summaries
+and the broader v2/v5 temporal reasoning gates remain open.
+
 After this retrieval and target-discovery change, `cargo make ci` passed in
 184.40 seconds on 2026-10-22. It covered workspace formatting, architecture,
 extension isolation, migration registries, instrumented/default checks, audit

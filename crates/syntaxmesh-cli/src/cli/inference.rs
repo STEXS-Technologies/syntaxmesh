@@ -5,6 +5,8 @@ use syntaxmesh_ownership_host::WriterLease;
 
 mod setup;
 pub(super) use setup::setup;
+mod catch_up;
+pub(super) use catch_up::catch_up;
 mod sync;
 pub(super) use sync::synchronize;
 mod read;

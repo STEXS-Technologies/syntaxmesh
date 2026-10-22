@@ -213,6 +213,261 @@ fn engine_retains_contract_history_through_penelope_and_recovers_it()
     Ok(())
 }
 
+#[test]
+fn engine_advances_retained_contracts_over_successors_and_recovers_partial_catch_up()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let database = directory.path().join("engine-contract-catch-up.sqlite");
+    InferenceMaterializer::migrate(&database)?;
+    let mut store = syntaxmesh_store::InMemoryGraphStore::new();
+    let (_rule, declared, retracted) = fixture::fixture(&mut store)?;
+    let first = store
+        .manifest(declared)?
+        .parent
+        .ok_or("fixture has no contract baseline generation")?;
+    let manifest = store.manifest(declared)?;
+    let contract = Contract {
+        id: "target-not-in-concept".to_owned(),
+        version: "1".to_owned(),
+        origin: ContractOrigin::Declared,
+        source: NodeId::derive(&[b"target"]),
+        target: NodeId::derive(&[b"concept"]),
+        relation: RelationKind::External {
+            namespace: "example".to_owned(),
+            relation: "instance_of".to_owned(),
+        },
+        expectation: RelationExpectation::Forbidden,
+    };
+    let contracts = [contract];
+    let limits = ContractLimits {
+        contracts: 1,
+        input_bytes: 16_384,
+        edge_visits: 100,
+        results: 1,
+    };
+    let mut engine =
+        SyntaxMeshEngine::new(store, RustExtractor, manifest.repository, manifest.worktree);
+    let baseline = engine.retain_contract_history(
+        &database,
+        &ContractHistoryRequest {
+            generation: first,
+            contracts: &contracts,
+            limits: &limits,
+            history_scan_budget: 100,
+            output_bytes: 16_384,
+        },
+    )?;
+    let request = ContractHistoryAdvanceRequest {
+        through_generation: retracted,
+        generation_budget: 2,
+        history_scan_budget: 100,
+        output_bytes_per_generation: 16_384,
+        limits,
+    };
+    if engine
+        .advance_contract_history(
+            &database,
+            ContractHistoryAdvanceRequest {
+                generation_budget: 1,
+                ..request
+            },
+        )
+        .is_ok()
+    {
+        return Err("insufficient generation budget published a partial catch-up".into());
+    }
+    if InferenceMaterializer::open(&database)?
+        .latest_contract_set(manifest.repository, manifest.worktree)?
+        .is_none_or(|set| set.watermark != baseline)
+    {
+        return Err("generation-budget rejection moved the retained contract head".into());
+    }
+
+    let retracted_hex = retracted.0.to_hex();
+    rusqlite::Connection::open(&database)?.execute_batch(&format!(
+        "CREATE TRIGGER interrupt_contract_catch_up BEFORE INSERT ON inference_contract_evaluations
+         WHEN NEW.generation = '{retracted_hex}'
+         BEGIN SELECT RAISE(ABORT, 'injected catch-up failure'); END;"
+    ))?;
+    if engine.advance_contract_history(&database, request).is_ok() {
+        return Err("injected second-generation contract failure was ignored".into());
+    }
+    let partial_head = InferenceMaterializer::open(&database)?
+        .latest_contract_set(manifest.repository, manifest.worktree)?
+        .ok_or("catch-up lost its complete prefix")?;
+    if partial_head.watermark.generation != declared {
+        return Err("failed catch-up did not preserve exactly its completed prefix".into());
+    }
+    rusqlite::Connection::open(&database)?
+        .execute_batch("DROP TRIGGER interrupt_contract_catch_up")?;
+
+    let resumed = engine.advance_contract_history(&database, request)?;
+    let materializer = InferenceMaterializer::open(&database)?;
+    let first_result = materializer
+        .contract_result_at(
+            manifest.repository,
+            manifest.worktree,
+            first,
+            "target-not-in-concept",
+            "1",
+        )?
+        .ok_or("baseline contract result disappeared")?;
+    let declared_result = materializer
+        .contract_result_at(
+            manifest.repository,
+            manifest.worktree,
+            declared,
+            "target-not-in-concept",
+            "1",
+        )?
+        .ok_or("first successor contract result was not retained")?;
+    let retracted_result = materializer
+        .contract_result_at(
+            manifest.repository,
+            manifest.worktree,
+            retracted,
+            "target-not-in-concept",
+            "1",
+        )?
+        .ok_or("recovered successor contract result was not retained")?;
+    if resumed.generations_advanced != 0
+        || resumed.last_watermark.generation != retracted
+        || first_result.evaluation.outcome
+            != syntaxmesh_inference::ContractOutcome::InsufficientEvidence
+        || declared_result.evaluation.outcome != syntaxmesh_inference::ContractOutcome::Contradicted
+        || retracted_result.evaluation.outcome
+            != syntaxmesh_inference::ContractOutcome::InsufficientEvidence
+    {
+        return Err("contract catch-up failed temporal outcomes or idempotent recovery".into());
+    }
+    let repeated = engine.advance_contract_history(&database, request)?;
+    if repeated.generations_advanced != 0 || repeated.last_watermark != resumed.last_watermark {
+        return Err("repeated contract catch-up was not an idempotent no-op".into());
+    }
+    Ok(())
+}
+
+fn exercise_contract_catch_up<S: GraphStore + DurableRecordStore>(
+    mut open: impl FnMut() -> Result<S, Box<dyn std::error::Error>>,
+    database: &Path,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut store = open()?;
+    let (_rule, declared, retracted) = fixture::fixture(&mut store)?;
+    let first = store
+        .manifest(declared)?
+        .parent
+        .ok_or("fixture has no contract baseline generation")?;
+    let manifest = store.manifest(declared)?;
+    let contract = Contract {
+        id: "target-not-in-concept".to_owned(),
+        version: "1".to_owned(),
+        origin: ContractOrigin::Declared,
+        source: NodeId::derive(&[b"target"]),
+        target: NodeId::derive(&[b"concept"]),
+        relation: RelationKind::External {
+            namespace: "example".to_owned(),
+            relation: "instance_of".to_owned(),
+        },
+        expectation: RelationExpectation::Forbidden,
+    };
+    let contracts = [contract];
+    let limits = ContractLimits {
+        contracts: 1,
+        input_bytes: 16_384,
+        edge_visits: 100,
+        results: 1,
+    };
+    let request = ContractHistoryAdvanceRequest {
+        through_generation: retracted,
+        generation_budget: 2,
+        history_scan_budget: 100,
+        output_bytes_per_generation: 16_384,
+        limits,
+    };
+    let mut engine =
+        SyntaxMeshEngine::new(store, RustExtractor, manifest.repository, manifest.worktree);
+    engine.retain_contract_history(
+        database,
+        &ContractHistoryRequest {
+            generation: first,
+            contracts: &contracts,
+            limits: &limits,
+            history_scan_budget: 100,
+            output_bytes: 16_384,
+        },
+    )?;
+    drop(engine);
+
+    let mut reopened = SyntaxMeshEngine::new(
+        open()?,
+        RustExtractor,
+        manifest.repository,
+        manifest.worktree,
+    );
+    let receipt = reopened.advance_contract_history(database, request)?;
+    if receipt.generations_advanced != 2
+        || receipt.starting_generation != first
+        || receipt.through_generation != retracted
+        || reopened.recover_inference()?.contract_history != 0
+    {
+        return Err("durable catch-up did not advance exactly through two generations".into());
+    }
+    drop(reopened);
+
+    let mut idempotent_reopen = SyntaxMeshEngine::new(
+        open()?,
+        RustExtractor,
+        manifest.repository,
+        manifest.worktree,
+    );
+    let repeated = idempotent_reopen.advance_contract_history(database, request)?;
+    if repeated.generations_advanced != 0 || repeated.last_watermark != receipt.last_watermark {
+        return Err("durable repeated catch-up was not an idempotent no-op".into());
+    }
+    let materializer = InferenceMaterializer::open(database)?;
+    let historical =
+        materializer.contract_history(&syntaxmesh_inference_sqlite::ContractHistoryQuery {
+            repository: manifest.repository,
+            worktree: manifest.worktree,
+            contract_id: "target-not-in-concept".to_owned(),
+            contract_version: "1".to_owned(),
+            after: None,
+            limit: 10,
+        })?;
+    if historical.items.len() != 3
+        || historical
+            .items
+            .iter()
+            .map(|item| item.evaluation.generation)
+            .collect::<Vec<_>>()
+            != [first, declared, retracted]
+    {
+        return Err("durable catch-up lost chronological contract results".into());
+    }
+    Ok(())
+}
+
+#[test]
+fn file_and_turso_contract_catch_up_survives_reopen() -> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let file_graph = directory.path().join("contract-file.snapshot");
+    let file_inference = directory.path().join("contract-file.sqlite");
+    InferenceMaterializer::migrate(&file_inference)?;
+    exercise_contract_catch_up(
+        || Ok(syntaxmesh_store::FileGraphStore::open(&file_graph)?),
+        &file_inference,
+    )?;
+
+    let turso_graph = directory.path().join("contract-turso.db");
+    let turso_inference = directory.path().join("contract-turso.sqlite");
+    syntaxmesh_store_turso::TursoGraphStore::migrate(&turso_graph)?;
+    InferenceMaterializer::migrate(&turso_inference)?;
+    exercise_contract_catch_up(
+        || Ok(syntaxmesh_store_turso::TursoGraphStore::open(&turso_graph)?),
+        &turso_inference,
+    )
+}
+
 fn ontology_definition(rule: &Rule) -> OntologyDefinition {
     let source_concept = NodeId::derive(&[b"source-concept"]);
     let relation = |name: &str| OntologyRelationDefinition {

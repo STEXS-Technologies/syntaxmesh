@@ -151,6 +151,12 @@ fn retained_contract_results_are_exact_indexed_and_restart_safe() -> Result<()> 
     {
         return Err("materialized history did not preserve generation-scoped outcomes".into());
     }
+    let latest_set = materializer
+        .latest_contract_set(repository, worktree)?
+        .ok_or("missing latest retained contract set")?;
+    if latest_set.watermark != retracted || latest_set.contracts != contracts {
+        return Err("latest retained contract set changed its source declarations".into());
+    }
     let point_plan = materializer
         .connection
         .prepare(
@@ -250,6 +256,12 @@ fn retained_contract_results_are_exact_indexed_and_restart_safe() -> Result<()> 
     {
         return Err("reopened materializer changed historical contract results".into());
     }
+    if reopened
+        .latest_contract_set(repository, worktree)?
+        .is_none_or(|set| set.watermark != retracted || set.contracts != contracts)
+    {
+        return Err("reopened latest contract set changed its integrity or declarations".into());
+    }
     let operation = retained.operation.to_hex();
     reopened.connection.execute(
         "UPDATE inference_contract_evaluations SET payload = X'00' WHERE operation = ?1 AND contract_id = 'target-not-in-concept'",
@@ -260,6 +272,40 @@ fn retained_contract_results_are_exact_indexed_and_restart_safe() -> Result<()> 
         .is_ok()
     {
         return Err("tampered retained contract result passed checksum validation".into());
+    }
+    reopened.connection.execute(
+        "UPDATE inference_contract_evaluations SET payload = X'00' WHERE operation = ?1 AND contract_id = 'target-not-in-concept'",
+        [retracted.operation.to_hex()],
+    )?;
+    if reopened.latest_contract_set(repository, worktree).is_ok() {
+        return Err("tampered latest contract set passed aggregate integrity validation".into());
+    }
+    Ok(())
+}
+
+#[test]
+fn latest_contract_set_rejects_multiple_sets_at_the_same_generation() -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    let path = directory.path().join("ambiguous-contract-history.sqlite");
+    InferenceMaterializer::migrate(&path)?;
+    let mut materializer = InferenceMaterializer::open(&path)?;
+    let mut store = InMemoryGraphStore::new();
+    let (_rule, _, _) = test_fixture::fixture(&mut store)?;
+    let generation = GenerationId::derive(&[b"first"]);
+    let contracts = contracts();
+    materializer.retain_contract_history(&store, &request(generation, &contracts, 16_384))?;
+    let mut additional = contracts[0].clone();
+    additional.id = "independent-contract-set".to_owned();
+    materializer.retain_contract_history(
+        &store,
+        &request(generation, std::slice::from_ref(&additional), 16_384),
+    )?;
+    let manifest = store.manifest(generation)?;
+    if materializer
+        .latest_contract_set(manifest.repository, manifest.worktree)
+        .is_ok()
+    {
+        return Err("ambiguous same-generation contract sets were not rejected".into());
     }
     Ok(())
 }

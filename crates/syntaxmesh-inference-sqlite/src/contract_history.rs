@@ -34,6 +34,13 @@ pub struct RetainedContractEvaluation {
     pub generation_sequence: u64,
 }
 
+/// Latest complete retained declaration set for a repository/worktree.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RetainedContractSet {
+    pub watermark: ContractHistoryWatermark,
+    pub contracts: Vec<Contract>,
+}
+
 /// Keyset cursor for one contract's chronological result history.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ContractHistoryCursor {
@@ -136,6 +143,120 @@ impl InferenceMaterializer {
         let payload_digest = blake3::hash(&digest_bytes).to_hex().to_string();
         self.publish_contract_history(watermark, &payloads, &payload_digest)?;
         Ok(watermark)
+    }
+
+    /// Read and integrity-check the latest complete retained declaration set.
+    ///
+    /// This is the source input for explicit incremental catch-up. It never
+    /// infers a set from a partial page of results.
+    ///
+    /// # Errors
+    /// Returns errors for incomplete sets, tampered rows/digests, or malformed
+    /// generation and operation identities.
+    pub fn latest_contract_set(
+        &self,
+        repository: RepositoryId,
+        worktree: WorktreeId,
+    ) -> Result<Option<RetainedContractSet>> {
+        let header = self
+            .connection
+            .query_row(
+                "SELECT operation, generation, generation_sequence, contract_count, payload_digest
+                 FROM inference_contract_evaluation_sets
+                 WHERE repository = ?1 AND worktree = ?2
+                 ORDER BY generation_sequence DESC, generation DESC LIMIT 1",
+                params![repository.0.to_hex(), worktree.0.to_hex()],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, i64>(2)?,
+                        row.get::<_, i64>(3)?,
+                        row.get::<_, String>(4)?,
+                    ))
+                },
+            )
+            .optional()?;
+        let Some((operation, generation, sequence, expected_count, expected_digest)) = header
+        else {
+            return Ok(None);
+        };
+        let generation = parse_generation(&generation)?;
+        let sequence = u64::try_from(sequence)?;
+        let expected_count = usize::try_from(expected_count)?;
+        let stored_operation = operation.clone();
+        let peer_sets: i64 = self.connection.query_row(
+            "SELECT COUNT(*) FROM inference_contract_evaluation_sets
+             WHERE repository = ?1 AND worktree = ?2 AND generation_sequence = ?3",
+            params![
+                repository.0.to_hex(),
+                worktree.0.to_hex(),
+                i64::try_from(sequence)?
+            ],
+            |row| row.get(0),
+        )?;
+        if peer_sets != 1 {
+            return Err("latest retained generation has ambiguous contract sets".into());
+        }
+        let mut statement = self.connection.prepare(
+            "SELECT contract_id, contract_version, evaluation_id, payload, payload_digest,
+                    generation, generation_sequence
+             FROM inference_contract_evaluations WHERE operation = ?1
+             ORDER BY contract_id, contract_version",
+        )?;
+        let mut rows = statement.query([&operation])?;
+        let mut retained = Vec::with_capacity(expected_count);
+        let mut digest_rows = Vec::with_capacity(expected_count);
+        while let Some(row) = rows.next()? {
+            let id = row.get::<_, String>(0)?;
+            let version = row.get::<_, String>(1)?;
+            let evaluation_id = row.get::<_, String>(2)?;
+            let payload = row.get::<_, Vec<u8>>(3)?;
+            let payload_digest = row.get::<_, String>(4)?;
+            let row_generation = parse_generation(&row.get::<_, String>(5)?)?;
+            let row_sequence = u64::try_from(row.get::<_, i64>(6)?)?;
+            let item = decode_payload(i64::try_from(row_sequence)?, &payload, &payload_digest)?;
+            if item.contract.id != id
+                || item.contract.version != version
+                || item.evaluation.id.to_hex() != evaluation_id
+                || item.evaluation.generation != generation
+                || row_generation != generation
+                || row_sequence != sequence
+            {
+                return Err("retained contract set row differs from its indexed identity".into());
+            }
+            digest_rows.push((
+                id,
+                version,
+                item.evaluation.id,
+                blake3::hash(&payload).to_hex().to_string(),
+            ));
+            retained.push(item.contract);
+        }
+        if retained.len() != expected_count {
+            return Err("retained contract set is incomplete".into());
+        }
+        let digest_bytes = bincode::serialize(&digest_rows)?;
+        if blake3::hash(&digest_bytes).to_hex().as_str() != expected_digest {
+            return Err("retained contract set aggregate digest mismatch".into());
+        }
+        let operation_input = bincode::serialize(&(repository, worktree, generation, &retained))?;
+        let expected_operation =
+            StableId::derive("contract-history-operation-v1", &[&operation_input]);
+        if expected_operation.to_hex() != stored_operation {
+            return Err("retained contract set operation identity mismatch".into());
+        }
+        Ok(Some(RetainedContractSet {
+            watermark: ContractHistoryWatermark {
+                operation: expected_operation,
+                repository,
+                worktree,
+                generation,
+                generation_sequence: sequence,
+                result_count: expected_count,
+            },
+            contracts: retained,
+        }))
     }
 
     /// Read one exact already-materialized contract result by generation.

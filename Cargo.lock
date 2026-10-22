@@ -4735,6 +4735,7 @@ name = "syntaxmesh-engine"
 version = "0.0.0"
 dependencies = [
  "blake3",
+ "rusqlite",
  "serde",
  "serde_json",
  "syntaxmesh-api-model",

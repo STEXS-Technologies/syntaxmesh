@@ -931,6 +931,7 @@ syntaxmesh inference-setup /path/to/state/graph.snapshot /path/to/state/inferenc
 syntaxmesh inference-sync /path/to/state/graph.snapshot /path/to/state/inference.sqlite "$successor_generation" /path/to/configuration.json /path/to/state/origin.json
 syntaxmesh inference-checkpoint /path/to/state/inference.sqlite "$baseline_generation" /path/to/state/origin.json
 syntaxmesh inference-claims-page /path/to/state/inference.sqlite "$baseline_generation" /path/to/state/origin.json 100 1048576 10000 10000
+syntaxmesh inference-catch-up /path/to/state/graph.snapshot /path/to/state/inference.sqlite "$through_generation" 100 10000 1048576 100000 1048576
 ```
 
 Migration is explicit and respects writer ownership. Recovery runs existing
@@ -941,6 +942,17 @@ does not need the original configuration. Configuration preflight is bounded to
 complete origin receipt; retain it for later commands. Use `inference-setup-turso`
 and `inference-sync-turso` for a Turso canonical store. Synchronization accepts one
 immediate successor, not an arbitrary jump; recover pending work explicitly.
+
+`inference-catch-up` advances the latest already-retained contract set over each
+immediate canonical successor through `through_generation`; it does not require
+resending declarations and never silently evaluates unretained generations on a
+read. The five numeric arguments independently bound generations, canonical
+history scans per generation, encoded contract input bytes, edge visits, and
+serialized output bytes per generation. A failed run keeps its completed prefix
+and Penelope recovery resumes prepared work. Use `inference-catch-up-turso` for
+a Turso canonical store. Contracts must already have been retained through the
+feature-enabled Engine API; CLI contract authoring and lifecycle management are
+not implemented yet.
 
 Configuration version 1 selects unregistered rule evaluation and remains
 backward-compatible. Version 2 selects ontology-registered inference and adds

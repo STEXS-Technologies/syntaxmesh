@@ -2,8 +2,8 @@ use crate::{Query, QueryError};
 use std::collections::BTreeSet;
 use syntaxmesh_core::{FactPayload, FactRef, FactVersionRef};
 use syntaxmesh_inference::{
-    BoundRuleSet, Claim, DiscoveryRange, Limits, OntologyRegistry, Premise,
-    RegisteredDiscoveryBudgets, Rule, Selection,
+    BoundRuleSet, Claim, Contract, ContractEvaluation, ContractLimits, DiscoveryRange, Limits,
+    OntologyRegistry, Premise, RegisteredDiscoveryBudgets, Rule, Selection,
 };
 use syntaxmesh_store::GraphStore;
 
@@ -78,6 +78,39 @@ impl<S: GraphStore + ?Sized> Query<'_, S> {
         history_scan_budget: usize,
     ) -> Result<Vec<Claim>, QueryError> {
         self.infer_rules(std::slice::from_ref(rule), limits, history_scan_budget, 1)
+    }
+
+    /// Evaluate explicit relation contracts over this query's pinned generation.
+    ///
+    /// The history scan bound limits canonical fact versions loaded; contract
+    /// count, bytes, relation visits, and result count use independent limits.
+    /// Missing relations are reported as insufficient evidence.
+    ///
+    /// # Errors
+    /// Rejects malformed retained history, invalid contracts, or exhausted bounds.
+    pub fn evaluate_contracts(
+        &self,
+        contracts: &[Contract],
+        contract_limits: &ContractLimits,
+        history_scan_budget: usize,
+    ) -> Result<Vec<ContractEvaluation>, QueryError> {
+        if history_scan_budget == 0 {
+            return Err(QueryError::InvalidLimit);
+        }
+        let (repository, worktree, nodes, premises) = self.load_inference_selection(
+            contract_limits.input_bytes,
+            history_scan_budget,
+            history_scan_budget,
+        )?;
+        let selection = Selection {
+            repository,
+            worktree,
+            generation: self.generation,
+            nodes: &nodes,
+            premises: &premises,
+        };
+        syntaxmesh_inference::evaluate_contracts(&selection, contracts, contract_limits)
+            .map_err(|error| QueryError::Context(error.to_string()))
     }
 
     /// Evaluate a bounded rule set over one authoritative retained selection.
@@ -191,6 +224,71 @@ impl<S: GraphStore + ?Sized> Query<'_, S> {
                 "inference rule budget exhausted".to_owned(),
             ));
         }
+        let (repository, worktree, nodes, premises) =
+            self.load_inference_selection(limits.input_bytes, limits.facts, history_scan_budget)?;
+        let selection = Selection {
+            repository,
+            worktree,
+            generation: self.generation,
+            nodes: &nodes,
+            premises: &premises,
+        };
+        let evaluation = if let Some((registry, bound_rules, binding_budget)) = registered {
+            seeds.map_or_else(
+                || {
+                    registry.evaluate_bound(
+                        &selection,
+                        bound_rules,
+                        limits,
+                        rule_budget,
+                        binding_budget,
+                    )
+                },
+                |seeds| {
+                    registry.evaluate_bound_discovered(
+                        &selection,
+                        bound_rules,
+                        seeds,
+                        limits,
+                        rule_budget,
+                        binding_budget,
+                    )
+                },
+            )
+        } else {
+            seeds.map_or_else(
+                || syntaxmesh_inference::evaluate_rules(&selection, rules, limits, rule_budget),
+                |opened| {
+                    syntaxmesh_inference::discover_rules(
+                        &selection,
+                        rules,
+                        opened,
+                        limits,
+                        rule_budget,
+                    )
+                },
+            )
+        };
+        evaluation.map_err(|error| QueryError::Context(error.to_string()))
+    }
+
+    fn load_inference_selection(
+        &self,
+        input_byte_budget: usize,
+        fact_budget: usize,
+        history_scan_budget: usize,
+    ) -> Result<
+        (
+            syntaxmesh_core::RepositoryId,
+            syntaxmesh_core::WorktreeId,
+            BTreeSet<syntaxmesh_core::NodeId>,
+            Vec<Premise>,
+        ),
+        QueryError,
+    > {
+        if history_scan_budget == 0 || input_byte_budget == 0 || fact_budget == 0 {
+            return Err(QueryError::InvalidLimit);
+        }
         let manifest = self.manifest()?;
         let sequence = self.store.generation_sequence(self.generation)?;
         let mut nodes = BTreeSet::new();
@@ -242,7 +340,7 @@ impl<S: GraphStore + ?Sized> Query<'_, S> {
                 if nodes
                     .len()
                     .checked_add(premises.len())
-                    .is_none_or(|count| count > limits.facts)
+                    .is_none_or(|count| count > fact_budget)
                 {
                     return Err(QueryError::Context(
                         "inference fact budget exhausted".to_owned(),
@@ -254,49 +352,6 @@ impl<S: GraphStore + ?Sized> Query<'_, S> {
             };
             cursor = Some(next);
         }
-        let selection = Selection {
-            repository: manifest.repository,
-            worktree: manifest.worktree,
-            generation: self.generation,
-            nodes: &nodes,
-            premises: &premises,
-        };
-        let evaluation = if let Some((registry, bound_rules, binding_budget)) = registered {
-            seeds.map_or_else(
-                || {
-                    registry.evaluate_bound(
-                        &selection,
-                        bound_rules,
-                        limits,
-                        rule_budget,
-                        binding_budget,
-                    )
-                },
-                |seeds| {
-                    registry.evaluate_bound_discovered(
-                        &selection,
-                        bound_rules,
-                        seeds,
-                        limits,
-                        rule_budget,
-                        binding_budget,
-                    )
-                },
-            )
-        } else {
-            seeds.map_or_else(
-                || syntaxmesh_inference::evaluate_rules(&selection, rules, limits, rule_budget),
-                |opened| {
-                    syntaxmesh_inference::discover_rules(
-                        &selection,
-                        rules,
-                        opened,
-                        limits,
-                        rule_budget,
-                    )
-                },
-            )
-        };
-        evaluation.map_err(|error| QueryError::Context(error.to_string()))
+        Ok((manifest.repository, manifest.worktree, nodes, premises))
     }
 }

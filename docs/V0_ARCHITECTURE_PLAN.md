@@ -165,6 +165,15 @@ generation validation and byte/visit/result bounds. Durable contract history,
 general predicates, severity policy, host delivery, and temporal drift remain
 open; this is one v2 contract primitive, not completion of v2 or v0–v5.
 
+[ADR-0377](adr/0377-generation-pinned-contract-query.md) exposes that evaluator
+through Query, loading integrity-checked active facts from its pinned generation
+under a distinct history-scan budget. Rule inference and contracts now share the
+same validated selection loader. A temporal fixture verifies that a relation
+present in a retained generation is cited by its exact opening version, while a
+later removal changes a forbidden contract from contradicted to insufficient
+evidence. Host delivery and durable contract-result history remain open; this
+is not complete v2 drift analysis.
+
 After this retrieval and target-discovery change, `cargo make ci` passed in
 184.40 seconds on 2026-10-22. It covered workspace formatting, architecture,
 extension isolation, migration registries, instrumented/default checks, audit

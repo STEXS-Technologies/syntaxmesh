@@ -12,18 +12,53 @@ fn tool_json(result: rmcp::model::CallToolResult) -> Result<Value, Box<dyn Error
     Ok(serde_json::from_str(&content.text)?)
 }
 
-fn node_names(value: &Value, field: &str) -> Result<Vec<String>, Box<dyn Error>> {
+fn node_facts(value: &Value, field: &str) -> Result<Vec<Value>, Box<dyn Error>> {
     let nodes = value
         .get(field)
         .and_then(Value::as_array)
         .ok_or_else(|| format!("{field} missing from query response"))?;
-    let mut names = nodes
+    let mut facts = nodes
         .iter()
-        .filter_map(|node| node.get("name").and_then(Value::as_str))
-        .map(str::to_owned)
-        .collect::<Vec<_>>();
-    names.sort();
-    Ok(names)
+        .map(|node| {
+            let id = node
+                .get("id")
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+                .or_else(|| {
+                    let id = node.get("id")?;
+                    id.as_array()
+                        .or_else(|| {
+                            id.get("0")
+                                .and_then(|stable_id| stable_id.get("0"))
+                                .and_then(Value::as_array)
+                        })
+                        .map(|bytes| {
+                            bytes
+                                .iter()
+                                .filter_map(Value::as_u64)
+                                .map(|byte| format!("{byte:02x}"))
+                                .collect::<String>()
+                        })
+                })
+                .ok_or_else(|| "node ID missing from query response".to_owned())?;
+            let kind = node
+                .get("kind")
+                .and_then(Value::as_str)
+                .ok_or_else(|| "node kind missing from query response".to_owned())?;
+            let name = node
+                .get("name")
+                .and_then(Value::as_str)
+                .ok_or_else(|| "node name missing from query response".to_owned())?;
+            Ok(serde_json::json!({
+                "id": id,
+                "kind": kind,
+                "name": name,
+                "source": node.get("source").cloned().unwrap_or(Value::Null),
+            }))
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+    facts.sort_by(|left, right| left["id"].as_str().cmp(&right["id"].as_str()));
+    Ok(facts)
 }
 
 #[test]
@@ -63,7 +98,7 @@ fn exercise_daemon_mcp(polling: bool, indexed: bool) -> Result<(), Box<dyn Error
         .build()?;
     let http_initial = search(&client, &base, "protocol_before", None)?;
     let http_initial_generation = generation(&http_initial)?.to_owned();
-    let http_initial_names = node_names(&http_initial, "data")?;
+    let http_initial_facts = node_facts(&http_initial, "data")?;
     for (header, value) in [
         ("origin", "https://example.com"),
         ("host", "evil.example"),
@@ -131,7 +166,7 @@ fn exercise_daemon_mcp(polling: bool, indexed: bool) -> Result<(), Box<dyn Error
             return Err::<(), Box<dyn Error>>("MCP protocol initial search missing".into());
         }
         if generation(&initial)? != http_initial_generation
-            || node_names(&initial, "nodes")? != http_initial_names
+            || node_facts(&initial, "nodes")? != http_initial_facts
         {
             return Err::<(), Box<dyn Error>>(
                 "daemon HTTP and MCP searches differ for the same accepted generation".into(),
@@ -189,7 +224,7 @@ fn exercise_daemon_mcp(polling: bool, indexed: bool) -> Result<(), Box<dyn Error
         .await?
         .map_err(std::io::Error::other)?;
         if generation(&after)? != generation(&http_after)?
-            || node_names(&after, "nodes")? != node_names(&http_after, "data")?
+            || node_facts(&after, "nodes")? != node_facts(&http_after, "data")?
         {
             return Err::<(), Box<dyn Error>>(
                 "daemon HTTP and MCP searches differ after the same watched edit".into(),

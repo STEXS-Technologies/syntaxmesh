@@ -67,6 +67,34 @@ pub struct ContractOutcomeEpisodeQuery {
     pub contract_version: String,
 }
 
+/// Keyset cursor scoped to one contract outcome timeline.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ContractOutcomeTimelineCursor {
+    pub repository: RepositoryId,
+    pub worktree: WorktreeId,
+    pub contract_id: String,
+    pub contract_version: String,
+    pub first_sequence: u64,
+}
+
+/// Bounded query for the retained outcome episodes of one contract version.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ContractOutcomeTimelineQuery {
+    pub repository: RepositoryId,
+    pub worktree: WorktreeId,
+    pub contract_id: String,
+    pub contract_version: String,
+    pub after: Option<ContractOutcomeTimelineCursor>,
+    pub limit: usize,
+}
+
+/// Chronological page of observed outcome episodes.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ContractOutcomeTimelinePage {
+    pub items: Vec<ContractOutcomeEpisode>,
+    pub next_cursor: Option<ContractOutcomeTimelineCursor>,
+}
+
 #[derive(Clone, Copy)]
 struct OutcomeEpisodeAdvance<'request> {
     repository: &'request str,
@@ -108,6 +136,127 @@ pub struct ContractHistoryPage {
 }
 
 impl InferenceMaterializer {
+    /// Read indexed outcome episodes in bounded chronological pages.
+    ///
+    /// Every returned episode boundary is checked against the retained result
+    /// at that generation. This is a latest-history timeline, not an as-of
+    /// query; use `contract_outcome_episode_at` for generation-pinned answers.
+    ///
+    /// # Errors
+    /// Rejects invalid page bounds, cross-scope cursors, and inconsistent rows.
+    pub fn contract_outcome_timeline(
+        &self,
+        query: &ContractOutcomeTimelineQuery,
+    ) -> Result<ContractOutcomeTimelinePage> {
+        if query.limit == 0 || query.limit > 1_000 {
+            return Err("invalid contract outcome timeline page limit".into());
+        }
+        if query.after.as_ref().is_some_and(|cursor| {
+            cursor.repository != query.repository
+                || cursor.worktree != query.worktree
+                || cursor.contract_id != query.contract_id
+                || cursor.contract_version != query.contract_version
+        }) {
+            return Err("contract outcome timeline cursor scope mismatch".into());
+        }
+        if let Some(cursor) = &query.after {
+            let exists: bool = self.connection.query_row(
+                "SELECT EXISTS (SELECT 1 FROM inference_contract_outcome_episodes
+                 WHERE repository = ?1 AND worktree = ?2 AND contract_id = ?3
+                   AND contract_version = ?4 AND first_sequence = ?5)",
+                params![
+                    query.repository.0.to_hex(),
+                    query.worktree.0.to_hex(),
+                    query.contract_id,
+                    query.contract_version,
+                    i64::try_from(cursor.first_sequence)?
+                ],
+                |row| row.get(0),
+            )?;
+            if !exists {
+                return Err("contract outcome timeline cursor is not a retained position".into());
+            }
+        }
+        let mut statement = self.connection.prepare(
+            "SELECT outcome, first_generation, first_sequence, last_generation, last_sequence
+             FROM inference_contract_outcome_episodes
+             WHERE repository = ?1 AND worktree = ?2 AND contract_id = ?3
+               AND contract_version = ?4 AND (?5 IS NULL OR first_sequence > ?5)
+             ORDER BY first_sequence LIMIT ?6",
+        )?;
+        let mut rows = statement.query(params![
+            query.repository.0.to_hex(),
+            query.worktree.0.to_hex(),
+            query.contract_id,
+            query.contract_version,
+            query
+                .after
+                .as_ref()
+                .map(|cursor| i64::try_from(cursor.first_sequence))
+                .transpose()?,
+            i64::try_from(
+                query
+                    .limit
+                    .checked_add(1)
+                    .ok_or("timeline limit overflow")?
+            )?,
+        ])?;
+        let mut items = Vec::new();
+        while let Some(row) = rows.next()? {
+            let outcome = parse_outcome(&row.get::<_, String>(0)?)?;
+            let first_generation = parse_generation(&row.get::<_, String>(1)?)?;
+            let first_sequence = u64::try_from(row.get::<_, i64>(2)?)?;
+            let last_generation = parse_generation(&row.get::<_, String>(3)?)?;
+            let last_sequence = u64::try_from(row.get::<_, i64>(4)?)?;
+            if first_sequence > last_sequence {
+                return Err("contract outcome episode has reversed sequence bounds".into());
+            }
+            for (generation, sequence) in [
+                (first_generation, first_sequence),
+                (last_generation, last_sequence),
+            ] {
+                let retained = self
+                    .contract_result_at(
+                        query.repository,
+                        query.worktree,
+                        generation,
+                        &query.contract_id,
+                        &query.contract_version,
+                    )?
+                    .ok_or("contract outcome timeline boundary has no retained result")?;
+                if retained.generation_sequence != sequence
+                    || retained.evaluation.outcome != outcome
+                {
+                    return Err(
+                        "contract outcome timeline boundary differs from retained result".into(),
+                    );
+                }
+            }
+            items.push(ContractOutcomeEpisode {
+                contract_id: query.contract_id.clone(),
+                contract_version: query.contract_version.clone(),
+                outcome,
+                first_generation,
+                first_sequence,
+                last_generation,
+                last_sequence,
+            });
+        }
+        let next_cursor = if items.len() > query.limit {
+            items.truncate(query.limit);
+            items.last().map(|episode| ContractOutcomeTimelineCursor {
+                repository: query.repository,
+                worktree: query.worktree,
+                contract_id: query.contract_id.clone(),
+                contract_version: query.contract_version.clone(),
+                first_sequence: episode.first_sequence,
+            })
+        } else {
+            None
+        };
+        Ok(ContractOutcomeTimelinePage { items, next_cursor })
+    }
+
     /// Backfill the compact outcome projection while applying migration 7.
     pub(crate) fn backfill_outcome_episodes(connection: &rusqlite::Connection) -> Result<()> {
         let mut sets_statement = connection.prepare(

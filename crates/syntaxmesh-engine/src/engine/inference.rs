@@ -3,8 +3,9 @@ use std::path::Path;
 use syntaxmesh_inference::{ContractLimits, OntologyDefinition, RegisteredInferenceAdmission};
 use syntaxmesh_inference_sqlite::{
     ContractHistoryPage, ContractHistoryQuery, ContractHistoryWatermark, ContractOutcomeEpisode,
-    ContractOutcomeEpisodeQuery, InferenceMaterializer, RebuildRequest, RetainedContractEvaluation,
-    RetainedContractSet, StreamCheckpoint, StreamOrigin, StreamSyncRequest,
+    ContractOutcomeEpisodeQuery, ContractOutcomeTimelinePage, ContractOutcomeTimelineQuery,
+    InferenceMaterializer, RebuildRequest, RetainedContractEvaluation, RetainedContractSet,
+    StreamCheckpoint, StreamOrigin, StreamSyncRequest,
 };
 use syntaxmesh_integration_penelope::{
     ContractHistoryRequest as PenelopeContractHistoryRequest, PenelopeInferenceMaterializer,
@@ -432,6 +433,40 @@ impl<S: GraphStore + DurableRecordStore, E: LanguageExtractor> SyntaxMeshEngine<
             evaluation: result.evaluation,
             episode,
         })
+    }
+
+    /// Read a bounded page of observed outcome episodes for one contract version.
+    ///
+    /// This is the latest retained timeline, not an as-of evaluation. Use
+    /// `contract_outcome_as_of` when interpreting a selected graph generation.
+    ///
+    /// # Errors
+    /// Rejects empty identities, invalid bounds, unmigrated storage, or corrupt episodes.
+    pub fn contract_outcome_timeline(
+        &self,
+        database: impl AsRef<Path>,
+        contract_id: &str,
+        contract_version: &str,
+        after: Option<syntaxmesh_inference_sqlite::ContractOutcomeTimelineCursor>,
+        limit: usize,
+    ) -> Result<ContractOutcomeTimelinePage, EngineError> {
+        if contract_id.is_empty() || contract_version.is_empty() {
+            return Err(WorkflowError::Verification(
+                "contract outcome timeline identity must be non-empty".to_owned(),
+            )
+            .into());
+        }
+        Ok(InferenceMaterializer::open(database)
+            .map_err(|error| WorkflowError::Verification(error.to_string()))?
+            .contract_outcome_timeline(&ContractOutcomeTimelineQuery {
+                repository: self.repository,
+                worktree: self.worktree,
+                contract_id: contract_id.to_owned(),
+                contract_version: contract_version.to_owned(),
+                after,
+                limit,
+            })
+            .map_err(|error| WorkflowError::Verification(error.to_string()))?)
     }
 
     /// Read a bounded indexed chronological page of materialized contract results.

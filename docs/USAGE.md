@@ -1001,6 +1001,13 @@ continuous conformance or elapsed calendar duration across unevaluated
 generations. Migration 7 backfills this downstream projection; run the explicit
 inference migration before using the command.
 
+`inference-outcome-timeline[-turso]` pages the compact observed episodes for one
+contract ID/version in chronological order without reading each retained result.
+Pass the returned `next_cursor` JSON as `cursor.json` for the next page. This is
+the latest retained timeline, not a generation-pinned conformance answer; use
+`inference-outcome-as-of` when interpreting a selected generation. The output
+labels its temporal claim as observed evaluation generations only.
+
 Configuration version 1 selects unregistered rule evaluation and remains
 backward-compatible. Version 2 selects ontology-registered inference and adds
 `ontology_definitions`, `registry_entries`, `registry_bytes`, and `bindings`.

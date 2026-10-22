@@ -11,6 +11,8 @@ mod as_of;
 pub(super) use as_of::result_as_of;
 mod outcome_as_of;
 pub(super) use outcome_as_of::outcome_as_of;
+mod outcome_timeline;
+pub(super) use outcome_timeline::outcome_timeline;
 mod catch_up;
 pub(super) use catch_up::catch_up;
 mod sync;

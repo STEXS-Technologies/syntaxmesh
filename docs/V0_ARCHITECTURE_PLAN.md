@@ -252,6 +252,15 @@ critical rule that stale evidence is not a current compliance conclusion; automa
 evaluation, authored-contract lifecycle, richer drift summaries, and broader
 v0–v5 acceptance remain open.
 
+[ADR-0386](adr/0386-bounded-contract-outcome-timeline.md) adds a bounded,
+keyset-paged read of the existing outcome-episode projection through the
+runtime-neutral Engine and File/Turso CLI. Cursors are bound to repository,
+worktree, contract, and version; episode boundaries are verified against the
+retained evaluations. The timeline is explicitly latest retained history,
+while generation-pinned interpretation stays on the separate as-of operation.
+No canonical migration or graph replay is added. This advances v2/v5 history
+visibility, not lifecycle policy or release completion.
+
 [ADR-0384](adr/0384-cli-authored-contract-sets.md) adds a versioned
 File/Turso CLI for authoring and retaining complete contract sets through the
 runtime-neutral Engine and Penelope. Exact retries at the same generation are

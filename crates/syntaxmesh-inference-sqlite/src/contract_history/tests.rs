@@ -194,6 +194,56 @@ fn retained_contract_results_are_exact_indexed_and_restart_safe() -> Result<()> 
     {
         return Err("outcome episodes did not retain observed transition boundaries".into());
     }
+    let first_timeline = materializer.contract_outcome_timeline(&ContractOutcomeTimelineQuery {
+        repository,
+        worktree,
+        contract_id: "target-not-in-concept".to_owned(),
+        contract_version: "1".to_owned(),
+        after: None,
+        limit: 1,
+    })?;
+    if first_timeline.items != [first_episode.clone()]
+        || first_timeline
+            .next_cursor
+            .as_ref()
+            .map(|cursor| cursor.first_sequence)
+            != Some(first_episode.first_sequence)
+    {
+        return Err("outcome timeline first page or cursor was incorrect".into());
+    }
+    let second_timeline =
+        materializer.contract_outcome_timeline(&ContractOutcomeTimelineQuery {
+            repository,
+            worktree,
+            contract_id: "target-not-in-concept".to_owned(),
+            contract_version: "1".to_owned(),
+            after: first_timeline.next_cursor,
+            limit: 2,
+        })?;
+    if second_timeline.items != [declared_episode.clone(), retracted_episode]
+        || second_timeline.next_cursor.is_some()
+    {
+        return Err("outcome timeline continuation lost transition order".into());
+    }
+    if materializer
+        .contract_outcome_timeline(&ContractOutcomeTimelineQuery {
+            repository,
+            worktree,
+            contract_id: "target-not-in-concept".to_owned(),
+            contract_version: "1".to_owned(),
+            after: Some(ContractOutcomeTimelineCursor {
+                repository,
+                worktree,
+                contract_id: "another-contract".to_owned(),
+                contract_version: "1".to_owned(),
+                first_sequence: first_episode.first_sequence,
+            }),
+            limit: 1,
+        })
+        .is_ok()
+    {
+        return Err("cross-contract outcome timeline cursor was accepted".into());
+    }
     materializer
         .connection
         .execute("DELETE FROM inference_contract_outcome_episodes", [])?;

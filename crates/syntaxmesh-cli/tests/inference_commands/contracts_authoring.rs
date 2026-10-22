@@ -218,6 +218,42 @@ fn run_authoring_lifecycle(
             .into());
     }
     let outcome: serde_json::Value = serde_json::from_slice(&historical_outcome.stdout)?;
+    let timeline_command = format!("inference-outcome-timeline{command_suffix}");
+    let first_timeline = invoke(&[
+        timeline_command.as_str(),
+        text(canonical)?,
+        text(downstream)?,
+        "target-not-in-concept",
+        "2",
+        "1",
+    ])?;
+    if !first_timeline.status.success() {
+        return Err(String::from_utf8_lossy(&first_timeline.stderr)
+            .into_owned()
+            .into());
+    }
+    let first_timeline: serde_json::Value = serde_json::from_slice(&first_timeline.stdout)?;
+    let cursor = first_timeline
+        .get("next_cursor")
+        .filter(|cursor| !cursor.is_null())
+        .ok_or("first outcome timeline page omitted its cursor")?;
+    let cursor_path = directory.join(format!("outcome-timeline-{command_suffix}.json"));
+    std::fs::write(&cursor_path, serde_json::to_vec(cursor)?)?;
+    let second_timeline = invoke(&[
+        timeline_command.as_str(),
+        text(canonical)?,
+        text(downstream)?,
+        "target-not-in-concept",
+        "2",
+        "1",
+        text(&cursor_path)?,
+    ])?;
+    if !second_timeline.status.success() {
+        return Err(String::from_utf8_lossy(&second_timeline.stderr)
+            .into_owned()
+            .into());
+    }
+    let second_timeline: serde_json::Value = serde_json::from_slice(&second_timeline.stdout)?;
     if old_history.items.len() != 1
         || omitted_episode.is_some()
         || old_history
@@ -244,6 +280,21 @@ fn run_authoring_lifecycle(
             .and_then(|episode| episode.get("first_generation"))
             != Some(&serde_json::to_value(first)?)
         || outcome
+            .get("temporal_claim")
+            .and_then(serde_json::Value::as_str)
+            != Some("observed_evaluation_generations_only")
+        || first_timeline
+            .get("items")
+            .and_then(serde_json::Value::as_array)
+            .is_none_or(|items| items.len() != 1)
+        || second_timeline
+            .get("items")
+            .and_then(serde_json::Value::as_array)
+            .is_none_or(|items| items.len() != 1)
+        || !second_timeline
+            .get("next_cursor")
+            .is_some_and(serde_json::Value::is_null)
+        || first_timeline
             .get("temporal_claim")
             .and_then(serde_json::Value::as_str)
             != Some("observed_evaluation_generations_only")

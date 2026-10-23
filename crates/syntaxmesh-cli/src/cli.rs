@@ -67,7 +67,8 @@ use rejections::{workflow_rejections, workflow_rejections_turso};
 use status::{integrity_snapshot, integrity_turso, status, status_turso};
 use timelines::{
     accepted_between, accepted_between_turso, change_correlations, change_correlations_turso,
-    observed_between, observed_between_turso,
+    fact_observation_bounds, fact_observation_bounds_turso, observed_between,
+    observed_between_turso,
 };
 
 const CLI_HELP: &str = "SyntaxMesh local Rust/Python/TypeScript/JavaScript/Bash/documentation graph engine\n\n\
@@ -107,6 +108,7 @@ Usage:\n\
   syntaxmesh change-set-events[-turso] <store> <change-set-id> <generation> <limit> [after-event-generation]\n\
   syntaxmesh accepted-between[-turso] <store> <from-ns> <until-ns> <limit> [cursor]\n\
   syntaxmesh observed-between[-turso] <store> <from-ns> <until-ns> <limit> [cursor]\n\
+  syntaxmesh fact-observation-bounds[-turso] <store> <file|provenance|node|edge> <id>\n\
   syntaxmesh neighbors[-turso] <store> <node-id>\n\
   syntaxmesh neighbors-at[-turso] <store> <generation> <node-id> <incoming|outgoing> <limit> [after-edge-id]\n\
   syntaxmesh neighborhood-at[-turso] <store> <generation> <seed-id[,seed-id...]> <max-hops> <max-nodes> <max-edges> <max-scanned-incidences> <max-result-bytes>\n\
@@ -1003,6 +1005,23 @@ fn run(arguments: impl IntoIterator<Item = String>) -> Result<(), CliError> {
                 observed_between(Path::new(&store_path), from, until, after, limit)
             } else {
                 observed_between_turso(Path::new(&store_path), from, until, after, limit)
+            }
+        }
+        "fact-observation-bounds" | "fact-observation-bounds-turso" => {
+            let store_path = arguments.next().ok_or_else(|| {
+                CliError::Usage(format!("{command} requires a snapshot/database path"))
+            })?;
+            let kind = arguments
+                .next()
+                .ok_or_else(|| CliError::Usage(format!("{command} requires a fact kind")))?;
+            let id = arguments
+                .next()
+                .ok_or_else(|| CliError::Usage(format!("{command} requires a fact ID")))?;
+            let fact = parse_fact_ref(&kind, &id)?;
+            if command == "fact-observation-bounds" {
+                fact_observation_bounds(Path::new(&store_path), fact)
+            } else {
+                fact_observation_bounds_turso(Path::new(&store_path), fact)
             }
         }
         "neighbors" => {

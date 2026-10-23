@@ -36,6 +36,7 @@ pub(crate) enum MigrationKind {
     V21ToV22,
     V22ToV23,
     V23ToV24,
+    V24ToV25,
 }
 
 pub(crate) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
@@ -215,5 +216,14 @@ pub(crate) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
             "../migrations/0024_fact_history_generation_lookup.up.sql"
         )),
         kind: MigrationKind::V23ToV24,
+    },
+    SchemaMigration {
+        from: 24,
+        to: 25,
+        name: "fact_observation_bounds",
+        checksum_sql: Some(include_str!(
+            "../migrations/0025_fact_observation_bounds.up.sql"
+        )),
+        kind: MigrationKind::V24ToV25,
     },
 ];

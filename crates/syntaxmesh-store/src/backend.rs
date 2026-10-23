@@ -143,6 +143,13 @@ pub struct ObservedFactVersion {
     pub version: FactHistoryVersion,
 }
 
+/// Minimum and maximum producer-reported observation timestamps for one fact.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FactObservationBounds {
+    pub first: ObservationTime,
+    pub last: ObservationTime,
+}
+
 /// Bounded page of observation-time fact versions.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ObservedFactPage {
@@ -1972,6 +1979,26 @@ pub trait GraphStore {
             .collect::<Vec<_>>();
         items.truncate(limit);
         Ok(ObservedFactPage { items, next_cursor })
+    }
+
+    /// Return producer-time extrema for one exact canonical fact identity.
+    /// Durable stores should answer through an identity/time index.
+    ///
+    /// # Errors
+    /// Returns a store error when retained fact history is unavailable or malformed.
+    fn fact_observation_bounds(
+        &self,
+        fact: FactRef,
+    ) -> Result<Option<FactObservationBounds>, StoreError> {
+        let versions = self.fact_history(fact)?;
+        let mut observed = versions.iter().filter_map(|version| version.observed_at);
+        let Some(first) = observed.next() else {
+            return Ok(None);
+        };
+        let (first, last) = observed.fold((first, first), |(minimum, maximum), item| {
+            (minimum.min(item), maximum.max(item))
+        });
+        Ok(Some(FactObservationBounds { first, last }))
     }
 
     /// Return accepted graph deltas from `from` (exclusive) through `to`

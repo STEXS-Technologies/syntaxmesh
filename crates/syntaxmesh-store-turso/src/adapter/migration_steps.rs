@@ -33,6 +33,7 @@ pub(super) async fn apply_schema_migration(
         MigrationKind::V21ToV22 => migrate_v21_to_v22(connection).await,
         MigrationKind::V22ToV23 => migrate_v22_to_v23(connection).await,
         MigrationKind::V23ToV24 => migrate_v23_to_v24(connection).await,
+        MigrationKind::V24ToV25 => migrate_v24_to_v25(connection).await,
     }
 }
 
@@ -153,6 +154,55 @@ async fn migrate_v23_to_v24(connection: &mut turso::Connection) -> Result<(), Tu
         .commit()
         .await
         .map_err(|error| TursoStoreError::Backend(format!("commit v24 migration: {error}")))
+}
+
+async fn migrate_v24_to_v25(connection: &mut turso::Connection) -> Result<(), TursoStoreError> {
+    let transaction = connection
+        .transaction_with_behavior(turso::transaction::TransactionBehavior::Immediate)
+        .await
+        .map_err(|error| {
+            TursoStoreError::Backend(format!("begin observation-bounds migration: {error}"))
+        })?;
+    transaction
+        .execute_batch(include_str!(
+            "../../migrations/0025_fact_observation_bounds.up.sql"
+        ))
+        .await
+        .map_err(|error| {
+            TursoStoreError::Backend(format!("create observation-bounds index: {error}"))
+        })?;
+    let migration = SCHEMA_MIGRATIONS
+        .iter()
+        .find(|item| item.to == 25)
+        .ok_or_else(|| {
+            TursoStoreError::Snapshot("v25 migration is missing from registry".to_owned())
+        })?;
+    let mut rows = transaction
+        .query("SELECT unixepoch()", ())
+        .await
+        .map_err(|error| TursoStoreError::Backend(format!("read migration time: {error}")))?;
+    let timestamp = rows
+        .next()
+        .await
+        .map_err(|error| TursoStoreError::Backend(format!("read migration time row: {error}")))?
+        .ok_or_else(|| TursoStoreError::Snapshot("migration time is missing".to_owned()))?
+        .get::<i64>(0)
+        .map_err(|error| TursoStoreError::Backend(format!("decode migration time: {error}")))?;
+    drop(rows);
+    transaction.execute(
+        "INSERT INTO syntaxmesh_schema_migrations (version, name, applied_at_unix_seconds, adopted, checksum) VALUES (?1, ?2, ?3, 0, ?4)",
+        (migration.to, migration.name, timestamp, migration_checksum(migration)),
+    ).await.map_err(|error| TursoStoreError::Backend(format!("record v25 migration: {error}")))?;
+    transaction
+        .execute("UPDATE syntaxmesh_schema SET version = 25 WHERE id = 1", ())
+        .await
+        .map_err(|error| {
+            TursoStoreError::Backend(format!("advance schema to version 25: {error}"))
+        })?;
+    transaction
+        .commit()
+        .await
+        .map_err(|error| TursoStoreError::Backend(format!("commit v25 migration: {error}")))
 }
 
 pub(super) async fn migrate_v21_to_v22(

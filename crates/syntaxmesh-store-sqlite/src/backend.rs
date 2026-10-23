@@ -56,7 +56,7 @@ use tree_store::{
     snapshot_tree_mutations,
 };
 
-const SCHEMA_VERSION: i64 = 21;
+const SCHEMA_VERSION: i64 = 22;
 const CHECKPOINT_INTERVAL: i64 = 64;
 const SCHEMA: &str = include_str!("../migrations/0000_initial_schema.sql");
 const CONSEQUENCE_RANGE_QUERY: &str = "WITH bounds AS (SELECT first_generation.sequence AS from_sequence, last_generation.sequence AS until_sequence FROM syntaxmesh_generation_history AS first_generation JOIN syntaxmesh_generation_history AS last_generation ON 1 = 1 WHERE first_generation.generation = ?1 AND last_generation.generation = ?2) SELECT bounds.from_sequence, bounds.until_sequence, edges.payload, start.generation, finish.generation FROM bounds LEFT JOIN syntaxmesh_consequence_edge_versions AS edges ON bounds.from_sequence <= bounds.until_sequence AND edges.valid_from_sequence <= bounds.until_sequence AND (edges.valid_until_sequence IS NULL OR edges.valid_until_sequence > bounds.from_sequence) AND ((edges.source_kind = ?3 AND edges.source_id = ?4 AND edges.source_fact_kind IS ?5 AND edges.source_valid_from_generation IS ?6) OR (edges.target_kind = ?7 AND edges.target_id = ?8 AND edges.target_fact_kind IS ?9 AND edges.target_valid_from_generation IS ?10)) AND (?11 IS NULL OR edges.edge_id > ?11) LEFT JOIN syntaxmesh_generation_history AS start ON start.sequence = edges.valid_from_sequence LEFT JOIN syntaxmesh_generation_history AS finish ON finish.sequence = edges.valid_until_sequence ORDER BY edges.edge_id LIMIT ?12";
@@ -69,8 +69,8 @@ const PROVENANCE_FACT: i64 = 1;
 const NODE_FACT: i64 = 2;
 const EDGE_FACT: i64 = 3;
 const INCIDENT_EDGE_NODE_BATCH_SIZE: usize = 128;
-const DROP_TEMPORAL_FACT_SECONDARY_INDEXES: &str = "DROP INDEX IF EXISTS syntaxmesh_fact_versions_identity_time_idx; DROP INDEX IF EXISTS syntaxmesh_fact_versions_time_idx; DROP INDEX IF EXISTS syntaxmesh_fact_versions_observed_time_idx; DROP INDEX IF EXISTS syntaxmesh_fact_versions_identity_end_idx; DROP INDEX IF EXISTS syntaxmesh_fact_versions_start_generation_idx; DROP INDEX IF EXISTS syntaxmesh_fact_versions_end_generation_idx;";
-const REBUILD_TEMPORAL_FACT_SECONDARY_INDEXES: &str = "CREATE INDEX IF NOT EXISTS syntaxmesh_fact_versions_identity_time_idx ON syntaxmesh_fact_versions(fact_kind, fact_id, valid_from_sequence, valid_until_sequence); CREATE INDEX IF NOT EXISTS syntaxmesh_fact_versions_time_idx ON syntaxmesh_fact_versions(fact_kind, valid_from_sequence, valid_until_sequence); CREATE INDEX IF NOT EXISTS syntaxmesh_fact_versions_observed_time_idx ON syntaxmesh_fact_versions(observed_at_unix_nanos, fact_kind, fact_id, valid_from_sequence) WHERE observed_at_unix_nanos IS NOT NULL; CREATE INDEX IF NOT EXISTS syntaxmesh_fact_versions_identity_end_idx ON syntaxmesh_fact_versions(fact_kind, fact_id, valid_until_sequence, valid_from_sequence); CREATE INDEX IF NOT EXISTS syntaxmesh_fact_versions_start_generation_idx ON syntaxmesh_fact_versions(valid_from_sequence, fact_kind, fact_id); CREATE INDEX IF NOT EXISTS syntaxmesh_fact_versions_end_generation_idx ON syntaxmesh_fact_versions(valid_until_sequence, fact_kind, fact_id);";
+const DROP_TEMPORAL_FACT_SECONDARY_INDEXES: &str = "DROP INDEX IF EXISTS syntaxmesh_fact_versions_identity_time_idx; DROP INDEX IF EXISTS syntaxmesh_fact_versions_time_idx; DROP INDEX IF EXISTS syntaxmesh_fact_versions_observed_time_idx; DROP INDEX IF EXISTS syntaxmesh_fact_versions_identity_observed_idx; DROP INDEX IF EXISTS syntaxmesh_fact_versions_identity_end_idx; DROP INDEX IF EXISTS syntaxmesh_fact_versions_start_generation_idx; DROP INDEX IF EXISTS syntaxmesh_fact_versions_end_generation_idx;";
+const REBUILD_TEMPORAL_FACT_SECONDARY_INDEXES: &str = "CREATE INDEX IF NOT EXISTS syntaxmesh_fact_versions_identity_time_idx ON syntaxmesh_fact_versions(fact_kind, fact_id, valid_from_sequence, valid_until_sequence); CREATE INDEX IF NOT EXISTS syntaxmesh_fact_versions_time_idx ON syntaxmesh_fact_versions(fact_kind, valid_from_sequence, valid_until_sequence); CREATE INDEX IF NOT EXISTS syntaxmesh_fact_versions_observed_time_idx ON syntaxmesh_fact_versions(observed_at_unix_nanos, fact_kind, fact_id, valid_from_sequence) WHERE observed_at_unix_nanos IS NOT NULL; CREATE INDEX IF NOT EXISTS syntaxmesh_fact_versions_identity_observed_idx ON syntaxmesh_fact_versions(fact_kind, fact_id, observed_at_unix_nanos, valid_from_sequence) WHERE observed_at_unix_nanos IS NOT NULL; CREATE INDEX IF NOT EXISTS syntaxmesh_fact_versions_identity_end_idx ON syntaxmesh_fact_versions(fact_kind, fact_id, valid_until_sequence, valid_from_sequence); CREATE INDEX IF NOT EXISTS syntaxmesh_fact_versions_start_generation_idx ON syntaxmesh_fact_versions(valid_from_sequence, fact_kind, fact_id); CREATE INDEX IF NOT EXISTS syntaxmesh_fact_versions_end_generation_idx ON syntaxmesh_fact_versions(valid_until_sequence, fact_kind, fact_id);";
 
 #[cfg(feature = "benchmark-instrumentation")]
 struct TransactionProfile {
@@ -1286,6 +1286,7 @@ fn validate_current_schema(connection: &Connection) -> Result<(), StoreError> {
         "syntaxmesh_fact_versions_identity_time_idx",
         "syntaxmesh_fact_versions_time_idx",
         "syntaxmesh_fact_versions_observed_time_idx",
+        "syntaxmesh_fact_versions_identity_observed_idx",
         "syntaxmesh_fact_versions_identity_end_idx",
         "syntaxmesh_fact_versions_start_generation_idx",
         "syntaxmesh_fact_versions_end_generation_idx",

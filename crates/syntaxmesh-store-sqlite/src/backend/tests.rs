@@ -205,7 +205,7 @@ fn schema_v8_migration_backfills_fact_linked_change_events() -> Result<(), Store
     if expected != actual
         || schema_version != SCHEMA_VERSION
         || adopted_count != 7
-        || executed_count != 13
+        || executed_count != 14
     {
         return Err(StoreError::Integrity(
             "SQLite change-event migration did not preserve lineage and migration ledger history"
@@ -955,7 +955,7 @@ fn schema_v10_migration_adds_checksums_to_sql_history() -> Result<(), StoreError
     drop(migrated);
     std::fs::remove_file(path)
         .map_err(|error| StoreError::Backend(format!("remove SQLite fixture: {error}")))?;
-    if checksum_count != 12 || version != SCHEMA_VERSION {
+    if checksum_count != 13 || version != SCHEMA_VERSION {
         return Err(StoreError::Integrity(format!(
             "SQLite v10 migration produced {checksum_count} SQL checksums at schema {version}"
         )));
@@ -1492,7 +1492,7 @@ fn migration_commit_failpoints_prove_rollback_and_reconcile_commit() -> Result<(
         || before_version != 10
         || checksum_column_exists
         || after_version != SCHEMA_VERSION
-        || checksum_count != 12
+        || checksum_count != 13
     {
         return Err(StoreError::Integrity(format!(
             "SQLite migration interruption boundaries left pre-version {before_version}/column={checksum_column_exists}, post-version {after_version}/checksums={checksum_count}"
@@ -1586,7 +1586,7 @@ fn migration_registry_is_contiguous_and_named() -> Result<(), StoreError> {
         .iter()
         .filter(|migration| migration.rollback_sql.is_some())
         .count()
-        != 6
+        != 7
     {
         return Err(StoreError::Integrity(
             "expected reversible consequence and acceptance-prefix migrations".to_owned(),

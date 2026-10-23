@@ -78,6 +78,24 @@ pub(super) fn observed_between_turso(
     observed_between_engine(&engine, generation, from, until, after, limit)
 }
 
+pub(super) fn fact_observation_bounds(snapshot: &Path, fact: FactRef) -> Result<(), CliError> {
+    let (engine, generation) = file_engine(snapshot)?;
+    let record = engine.query(generation).fact_observation_bounds(fact)?;
+    write_stdout(&record.to_json_line().map_err(CliError::Encode)?)?;
+    Ok(())
+}
+
+pub(super) fn fact_observation_bounds_turso(
+    database: &Path,
+    fact: FactRef,
+) -> Result<(), CliError> {
+    let ownership = syntaxmesh_ownership_host::WriterLease::acquire(database)?;
+    let (engine, generation) = turso_engine(&ownership)?;
+    let record = engine.query(generation).fact_observation_bounds(fact)?;
+    write_stdout(&record.to_json_line().map_err(CliError::Encode)?)?;
+    Ok(())
+}
+
 fn observed_between_engine<S: GraphStore + DurableRecordStore>(
     engine: &SyntaxMeshEngine<S, RustExtractor>,
     generation: GenerationId,

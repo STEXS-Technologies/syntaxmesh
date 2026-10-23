@@ -9,7 +9,7 @@ use syntaxmesh_core::{
 };
 
 pub const GRAPH_EXPORT_SCHEMA_VERSION: u32 = 7;
-pub const TEMPORAL_EXPORT_SCHEMA_VERSION: u32 = 13;
+pub const TEMPORAL_EXPORT_SCHEMA_VERSION: u32 = 14;
 pub const ACCEPTANCE_TIMELINE_SCHEMA_VERSION: u32 = 2;
 pub const HISTORICAL_NEIGHBORHOOD_SCHEMA_VERSION: u32 = 1;
 pub const CONSEQUENCE_TRACE_SCHEMA_VERSION: u32 = 1;
@@ -369,6 +369,14 @@ pub enum TemporalRecord {
         has_more: bool,
         next_cursor: Option<ObservedFactCursor>,
     },
+    /// Producer-time bounds for one exact fact identity, not runtime-execution proof.
+    FactObservationBounds {
+        schema_version: u32,
+        query_mode: TemporalQueryMode,
+        fact: syntaxmesh_core::FactRef,
+        first_observed_at: Option<ObservationTime>,
+        last_observed_at: Option<ObservationTime>,
+    },
     /// Header binding a temporal consequence trace stream to its origin and range.
     ConsequenceTraceHeader {
         schema_version: u32,
@@ -480,7 +488,7 @@ mod tests {
             },
         };
         let line = record.to_json_line().unwrap_or_default();
-        assert!(line.contains("\"schema_version\":13"));
+        assert!(line.contains("\"schema_version\":14"));
         assert!(line.contains("\"query_mode\":\"historical_conclusion\""));
         assert!(serde_json::from_str::<TemporalRecord>(&line).is_ok_and(|parsed| parsed == record));
     }
@@ -512,7 +520,7 @@ mod tests {
             event,
         };
         let line = record.to_json_line().unwrap_or_default();
-        assert!(line.contains("\"schema_version\":13"));
+        assert!(line.contains("\"schema_version\":14"));
         assert!(!line.contains("caused"));
         assert!(serde_json::from_str::<TemporalRecord>(&line).is_ok_and(|parsed| parsed == record));
     }
@@ -544,7 +552,7 @@ mod tests {
             event,
         };
         let line = record.to_json_line().unwrap_or_default();
-        assert!(line.contains("\"schema_version\":13"));
+        assert!(line.contains("\"schema_version\":14"));
         assert!(!line.contains("resolved"));
         assert!(serde_json::from_str::<TemporalRecord>(&line).is_ok_and(|parsed| parsed == record));
     }
@@ -597,7 +605,7 @@ mod tests {
         };
         for record in [item, footer] {
             let line = record.to_json_line().unwrap_or_default();
-            assert!(line.contains("\"schema_version\":13"));
+            assert!(line.contains("\"schema_version\":14"));
             assert!(
                 serde_json::from_str::<TemporalRecord>(&line).is_ok_and(|parsed| parsed == record)
             );
@@ -702,7 +710,7 @@ mod tests {
         ];
         for record in records {
             let line = record.to_json_line().unwrap_or_default();
-            assert!(line.contains("\"schema_version\":13"));
+            assert!(line.contains("\"schema_version\":14"));
             assert!(serde_json::from_str::<TemporalRecord>(&line).is_ok_and(|p| p == record));
         }
     }
@@ -818,7 +826,7 @@ mod tests {
             accepted_at: Some(AcceptanceTime(123)),
         };
         let line = record.to_json_line().unwrap_or_default();
-        assert!(line.contains("\"schema_version\":13"));
+        assert!(line.contains("\"schema_version\":14"));
         assert!(line.contains("\"type\":\"fact_supersedes\""));
         assert!(serde_json::from_str::<TemporalRecord>(&line).is_ok_and(|parsed| parsed == record));
     }
@@ -854,7 +862,7 @@ mod tests {
         ];
         for record in records {
             let line = record.to_json_line().unwrap_or_default();
-            assert!(line.contains("\"schema_version\":13"));
+            assert!(line.contains("\"schema_version\":14"));
             assert!(line.contains("\"query_mode\":\"historical_conclusion\""));
             assert!(
                 serde_json::from_str::<TemporalRecord>(&line).is_ok_and(|parsed| parsed == record)
@@ -925,7 +933,7 @@ mod tests {
         ];
         for record in records {
             let line = record.to_json_line().unwrap_or_default();
-            assert!(line.contains("\"schema_version\":13"));
+            assert!(line.contains("\"schema_version\":14"));
             assert!(line.contains("\"query_mode\":\"historical_conclusion\""));
             assert!(
                 serde_json::from_str::<TemporalRecord>(&line).is_ok_and(|parsed| parsed == record)
@@ -965,7 +973,7 @@ mod tests {
         ];
         for record in records {
             let line = record.to_json_line().unwrap_or_default();
-            assert!(line.contains("\"schema_version\":13"));
+            assert!(line.contains("\"schema_version\":14"));
             assert!(line.contains("\"query_mode\":\"historical_conclusion\""));
             assert!(
                 serde_json::from_str::<TemporalRecord>(&line).is_ok_and(|parsed| parsed == record)
@@ -1007,6 +1015,13 @@ mod tests {
                 returned: 1,
                 has_more: true,
                 next_cursor: Some(cursor),
+            },
+            TemporalRecord::FactObservationBounds {
+                schema_version: TEMPORAL_EXPORT_SCHEMA_VERSION,
+                query_mode: TemporalQueryMode::ObservationTimeline,
+                fact,
+                first_observed_at: Some(ObservationTime(123)),
+                last_observed_at: Some(ObservationTime(456)),
             },
         ];
         for record in records {

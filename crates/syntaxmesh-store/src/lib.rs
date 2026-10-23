@@ -22,12 +22,12 @@ pub use backend::{
     BackendIntegrityReport, ChangeEventPage, ChangeSetVersion, ConsequenceEdgePage,
     ConsequenceRangePage, DurableRecordPage, DurableRecordStore, EventsForChangeSetPage,
     FactHistoryCursor, FactHistoryEntry, FactHistoryPage, FactHistoryVersion,
-    FactVersionChangeCursor, FactVersionChangePage, FactVersionValidity, FileGraphStore,
-    GenerationChange, GenerationChangeCursor, GenerationChangePage, GraphStore, HistoricalEdgePage,
-    HistoricalFilePage, HistoricalNodePage, InMemoryGraphStore, MAX_FACT_VERSION_CHANGE_PAGE_SIZE,
-    MAX_GENERATION_CHANGE_PAGE_SIZE, MAX_HISTORICAL_EDGE_PAGE_SIZE, MAX_HISTORICAL_FILE_PAGE_SIZE,
-    MAX_HISTORICAL_NODE_PAGE_SIZE, NodeHistoryVersion, ObservedFactPage, ObservedFactVersion,
-    StoreError, graph_snapshot_root_v2,
+    FactObservationBounds, FactVersionChangeCursor, FactVersionChangePage, FactVersionValidity,
+    FileGraphStore, GenerationChange, GenerationChangeCursor, GenerationChangePage, GraphStore,
+    HistoricalEdgePage, HistoricalFilePage, HistoricalNodePage, InMemoryGraphStore,
+    MAX_FACT_VERSION_CHANGE_PAGE_SIZE, MAX_GENERATION_CHANGE_PAGE_SIZE,
+    MAX_HISTORICAL_EDGE_PAGE_SIZE, MAX_HISTORICAL_FILE_PAGE_SIZE, MAX_HISTORICAL_NODE_PAGE_SIZE,
+    NodeHistoryVersion, ObservedFactPage, ObservedFactVersion, StoreError, graph_snapshot_root_v2,
 };
 pub use persistent_fact_tree::{
     PersistentFactKey, PersistentFactMutation, PersistentFactNode, PersistentFactTree,

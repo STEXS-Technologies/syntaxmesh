@@ -14,7 +14,7 @@ use super::migration_steps::{
     migrate_v6_to_v7, migrate_v7_to_v8, migrate_v8_to_v9, migrate_v9_to_v10, migrate_v10_to_v11,
     migrate_v11_to_v12, migrate_v12_to_v13, migrate_v13_to_v14, migrate_v14_to_v15,
     migrate_v15_to_v16, migrate_v16_to_v17, migrate_v17_to_v18, migrate_v18_to_v19,
-    migrate_v19_to_v20, migrate_v20_to_v21,
+    migrate_v19_to_v20, migrate_v20_to_v21, migrate_v21_to_v22,
 };
 
 #[derive(Debug)]
@@ -267,6 +267,21 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
         )),
         rollback_sql: Some(include_str!(
             "../../migrations/0021_fact_history_generation_lookup.down.sql"
+        )),
+    },
+    SchemaMigration {
+        from: 21,
+        to: 22,
+        name: "fact_observation_bounds",
+        apply: migrate_v21_to_v22,
+        checksum_sql: Some(include_str!(
+            "../../migrations/0022_fact_observation_bounds.up.sql"
+        )),
+        fresh_bootstrap_sql: Some(include_str!(
+            "../../migrations/0022_fact_observation_bounds.up.sql"
+        )),
+        rollback_sql: Some(include_str!(
+            "../../migrations/0022_fact_observation_bounds.down.sql"
         )),
     },
 ];

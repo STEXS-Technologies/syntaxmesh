@@ -1086,6 +1086,7 @@ fn searches_and_traverses_one_generation() -> Result<(), QueryError> {
         | TemporalRecord::ConsequenceTraceFooter { .. }
         | TemporalRecord::ObservedFact { .. }
         | TemporalRecord::ObservedTimelineFooter { .. }
+        | TemporalRecord::FactObservationBounds { .. }
         | TemporalRecord::AcceptanceTimelineFooter {
             next_cursor: None, ..
         } => None,
@@ -1095,6 +1096,16 @@ fn searches_and_traverses_one_generation() -> Result<(), QueryError> {
     let next_accepted =
         timeline.accepted_between(AcceptanceTime(10), AcceptanceTime(21), cursor, 1)?;
     if history.len() != 1
+        || !matches!(
+            timeline.fact_observation_bounds(FactRef::Node(first.id))?,
+            TemporalRecord::FactObservationBounds {
+                schema_version: TEMPORAL_EXPORT_SCHEMA_VERSION,
+                query_mode: TemporalQueryMode::ObservationTimeline,
+                first_observed_at: None,
+                last_observed_at: None,
+                ..
+            }
+        )
         || !matches!(history.first(), Some(TemporalRecord::NodeVersion { schema_version: TEMPORAL_EXPORT_SCHEMA_VERSION, query_mode: TemporalQueryMode::HistoricalConclusion, valid_from, node, .. }) if *valid_from == manifest.generation && node.id == first.id)
         || changes.len() != 1
         || !matches!(

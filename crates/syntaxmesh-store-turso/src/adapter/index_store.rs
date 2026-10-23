@@ -351,6 +351,15 @@ impl GraphStore for TursoGraphStore {
             .map_err(Self::map_backend)
     }
 
+    fn fact_observation_bounds(
+        &self,
+        fact: FactRef,
+    ) -> Result<Option<syntaxmesh_store::FactObservationBounds>, StoreError> {
+        self.runtime
+            .block_on(read_fact_observation_bounds(&self.connection, fact))
+            .map_err(Self::map_backend)
+    }
+
     fn changes_between(
         &self,
         from: GenerationId,
@@ -1566,6 +1575,59 @@ async fn read_observed_facts_between(
     };
     items.truncate(limit);
     Ok(ObservedFactPage { items, next_cursor })
+}
+
+async fn read_fact_observation_bounds(
+    connection: &turso::Connection,
+    fact: FactRef,
+) -> Result<Option<syntaxmesh_store::FactObservationBounds>, TursoStoreError> {
+    let (kind, id) = syntaxmesh_store::fact_storage_key(fact);
+    let mut first_rows = connection
+        .query(
+            "SELECT observed_at_unix_nanos FROM syntaxmesh_fact_versions INDEXED BY syntaxmesh_fact_versions_identity_observed_idx WHERE fact_kind = ?1 AND fact_id = ?2 AND observed_at_unix_nanos IS NOT NULL ORDER BY observed_at_unix_nanos ASC LIMIT 1",
+            (kind, id.clone()),
+        )
+        .await
+        .map_err(|error| TursoStoreError::Backend(format!("read fact observation bounds: {error}")))?;
+    let Some(first_row) = first_rows.next().await.map_err(|error| {
+        TursoStoreError::Backend(format!("read first observation bound row: {error}"))
+    })?
+    else {
+        return Ok(None);
+    };
+    let first_value = first_row.get_value(0).map_err(|error| {
+        TursoStoreError::Backend(format!("read first observation bound: {error}"))
+    })?;
+    let mut last_rows = connection
+        .query(
+            "SELECT observed_at_unix_nanos FROM syntaxmesh_fact_versions INDEXED BY syntaxmesh_fact_versions_identity_observed_idx WHERE fact_kind = ?1 AND fact_id = ?2 AND observed_at_unix_nanos IS NOT NULL ORDER BY observed_at_unix_nanos DESC LIMIT 1",
+            (kind, id),
+        )
+        .await
+        .map_err(|error| TursoStoreError::Backend(format!("read fact observation bounds: {error}")))?;
+    let last_row = last_rows
+        .next()
+        .await
+        .map_err(|error| {
+            TursoStoreError::Backend(format!("read last observation bound row: {error}"))
+        })?
+        .ok_or_else(|| TursoStoreError::Snapshot("last observation bound is missing".to_owned()))?;
+    let last_value = last_row.get_value(0).map_err(|error| {
+        TursoStoreError::Backend(format!("read last observation bound: {error}"))
+    })?;
+    let first =
+        read_optional_time_value(first_value, "first observation bound")?.map(ObservationTime);
+    let last = read_optional_time_value(last_value, "last observation bound")?.map(ObservationTime);
+    match (first, last) {
+        (None, None) => Ok(None),
+        (Some(first), Some(last)) => Ok(Some(syntaxmesh_store::FactObservationBounds {
+            first,
+            last,
+        })),
+        _ => Err(TursoStoreError::Snapshot(
+            "fact observation bounds have only one endpoint".to_owned(),
+        )),
+    }
 }
 
 async fn read_observed_rows(

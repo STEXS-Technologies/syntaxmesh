@@ -1215,6 +1215,7 @@ fn publish_fact_lineage<S: GraphStore>(store: &mut S) -> Result<FactLineageScena
         | TemporalRecord::ConsequenceTraceFooter { .. }
         | TemporalRecord::ObservedFact { .. }
         | TemporalRecord::ObservedTimelineFooter { .. }
+        | TemporalRecord::FactObservationBounds { .. }
         | TemporalRecord::HistoricalNeighbor { .. }
         | TemporalRecord::HistoricalNeighborFooter { .. } => None,
     });
@@ -2239,6 +2240,19 @@ fn publish_reference_facts(store: &mut dyn GraphStore) -> Result<LogicalSnapshot
         return Err(StoreError::Integrity(
             "observation timeline cursor skipped, duplicated, or rewrote event-time facts"
                 .to_owned(),
+        ));
+    }
+    let selected_fact = first_item
+        .ok_or_else(|| StoreError::Integrity("observation test item missing".to_owned()))?
+        .fact;
+    if store.fact_observation_bounds(selected_fact)?
+        != Some(syntaxmesh_store::FactObservationBounds {
+            first: ObservationTime(123),
+            last: ObservationTime(123),
+        })
+    {
+        return Err(StoreError::Integrity(
+            "indexed fact observation bounds did not match the retained producer time".to_owned(),
         ));
     }
     read_snapshot(store, generation)

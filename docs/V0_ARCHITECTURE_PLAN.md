@@ -2,6 +2,20 @@
 
 Status: active implementation plan; last updated 2026-10-23. The two source-of-truth documents in this directory remain authoritative for product intent. This plan records implementation evidence and the remaining v0–v5 exit gates.
 
+### Indexed exact-fact observation bounds (2026-10-23)
+
+[ADR-0397](adr/0397-indexed-fact-observation-bounds.md) adds a typed
+`fact-observation-bounds[-turso]` query for the first and last producer-reported
+observation times attached to one exact canonical fact identity. Durable query
+work is supported by a fact-identity/time index with registered SQLite and
+Turso migrations; reference stores scan only that fact's retained versions.
+The record is explicitly an observation-time bound, not proof of runtime
+execution or a selector-level `FirstObserved`/`LastObserved` behavior query.
+The all-backend temporal conformance suite checks exact-fact bounds; the
+versioned-record round-trip, Query service, migration-registry, durable restart,
+and adapter suites pass. Broader v5 Stage D behavior-to-observation mapping
+remains open.
+
 ## 1. Scope and release distinction
 
 ### Context packer compaction retry (2026-10-22)

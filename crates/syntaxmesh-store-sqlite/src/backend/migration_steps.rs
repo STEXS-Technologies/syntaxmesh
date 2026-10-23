@@ -855,6 +855,34 @@ pub(super) fn migrate_v20_to_v21(
     commit_schema_migration(transaction, path, 21)
 }
 
+pub(super) fn migrate_v21_to_v22(
+    connection: &mut Connection,
+    path: &Path,
+) -> Result<(), StoreError> {
+    let transaction = connection
+        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .map_err(sql_error)?;
+    transaction
+        .execute_batch(include_str!(
+            "../../migrations/0022_fact_observation_bounds.up.sql"
+        ))
+        .map_err(sql_error)?;
+    transaction
+        .execute(
+            "UPDATE syntaxmesh_schema SET version = 22 WHERE id = 1 AND version = 21",
+            [],
+        )
+        .map_err(sql_error)?;
+    if transaction.changes() != 1 {
+        return Err(StoreError::Integrity(
+            "SQLite observation-bounds migration did not advance exactly one version row"
+                .to_owned(),
+        ));
+    }
+    record_schema_migration(&transaction, 22)?;
+    commit_schema_migration(transaction, path, 22)
+}
+
 fn index_edge(
     edge: Edge,
     active_edges: &mut BTreeMap<EdgeId, Edge>,

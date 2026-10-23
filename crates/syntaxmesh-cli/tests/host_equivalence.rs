@@ -2385,7 +2385,7 @@ fn sqlite_migration_cli_reports_read_only_status_and_explicit_upgrade() -> Resul
         .output()?;
     let migrated_stdout = String::from_utf8(migrated.stdout)?;
     if !migrated.status.success()
-        || !migrated_stdout.contains("sqlite_schema_version=21")
+        || !migrated_stdout.contains("sqlite_schema_version=22")
         || !migrated_stdout.contains("sqlite_migration_ledger_validated=true")
         || !migrated_stdout.contains("sqlite_migration=applied")
     {

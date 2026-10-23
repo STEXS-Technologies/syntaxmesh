@@ -2270,6 +2270,22 @@ where
         Ok(records)
     }
 
+    /// Return producer-time extrema for one exact fact. These timestamps do
+    /// not establish that a runtime executed a behavior.
+    ///
+    /// # Errors
+    /// Returns a query error when the selected store cannot read retained history.
+    pub fn fact_observation_bounds(&self, fact: FactRef) -> Result<TemporalRecord, QueryError> {
+        let bounds = self.store.fact_observation_bounds(fact)?;
+        Ok(TemporalRecord::FactObservationBounds {
+            schema_version: TEMPORAL_EXPORT_SCHEMA_VERSION,
+            query_mode: TemporalQueryMode::ObservationTimeline,
+            fact,
+            first_observed_at: bounds.map(|value| value.first),
+            last_observed_at: bounds.map(|value| value.last),
+        })
+    }
+
     /// Export a deterministic, weakly connected neighborhood as bounded NDJSON records.
     ///
     /// Traversal includes incoming and outgoing edges. The node cap may omit

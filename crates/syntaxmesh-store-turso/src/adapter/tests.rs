@@ -706,6 +706,7 @@ fn migration_registry_is_contiguous_and_reaches_current_schema() -> Result<(), T
                         | MigrationKind::V21ToV22
                         | MigrationKind::V22ToV23
                         | MigrationKind::V23ToV24
+                        | MigrationKind::V24ToV25
                 ))
         {
             return Err(TursoStoreError::Snapshot(format!(

@@ -384,6 +384,38 @@ impl GraphStore for SqliteGraphStore {
         )
     }
 
+    fn fact_observation_bounds(
+        &self,
+        fact: FactRef,
+    ) -> Result<Option<syntaxmesh_store::FactObservationBounds>, StoreError> {
+        let (kind, id) = syntaxmesh_store::fact_storage_key(fact);
+        let select = |sql: &str| {
+            self.connection
+                .query_row(sql, rusqlite::params![kind, id], |row| {
+                    row.get::<_, Vec<u8>>(0)
+                })
+                .optional()
+                .map_err(sql_error)
+        };
+        let Some(first) = select(
+            "SELECT observed_at_unix_nanos FROM syntaxmesh_fact_versions INDEXED BY syntaxmesh_fact_versions_identity_observed_idx WHERE fact_kind = ?1 AND fact_id = ?2 AND observed_at_unix_nanos IS NOT NULL ORDER BY observed_at_unix_nanos ASC LIMIT 1",
+        )?
+        else {
+            return Ok(None);
+        };
+        let last = select("SELECT observed_at_unix_nanos FROM syntaxmesh_fact_versions INDEXED BY syntaxmesh_fact_versions_identity_observed_idx WHERE fact_kind = ?1 AND fact_id = ?2 AND observed_at_unix_nanos IS NOT NULL ORDER BY observed_at_unix_nanos DESC LIMIT 1")?.ok_or_else(|| {
+            StoreError::Integrity("last observation bound missing after first bound".to_owned())
+        })?;
+        let first = decode_optional_time(Some(first), "first observed time")?
+            .ok_or_else(|| StoreError::Integrity("first observation bound is NULL".to_owned()))?;
+        let last = decode_optional_time(Some(last), "last observed time")?
+            .ok_or_else(|| StoreError::Integrity("last observation bound is NULL".to_owned()))?;
+        Ok(Some(syntaxmesh_store::FactObservationBounds {
+            first: ObservationTime(first),
+            last: ObservationTime(last),
+        }))
+    }
+
     fn changes_between(
         &self,
         from: GenerationId,

@@ -507,6 +507,15 @@ graph evidence is available without indexing replay; changed filesystem bytes
 are excluded from source snippets and reported as `stale_source`. This does not
 archive historical source files or bypass stale-host restart requirements.
 
+The `explain_inference_claim` MCP tool accepts the serialized claim returned by
+`inference_claims_page` and the matching `Rule` JSON from the inference
+configuration. It verifies the deterministic witness against the claim's exact
+retained graph generation and returns ordered premise edges with producer
+provenance and source spans when available. The host applies fixed premise,
+depth, input, and output bounds. This is a direct proof witness, not a recursive
+proof tree or an LLM-generated explanation; mismatched rules and unavailable
+historical evidence are rejected ([ADR-0396](docs/adr/0396-mcp-verified-claim-explanation.md)).
+
 Add `--source-content-context` to the standalone MCP launch command to opt into
 indexed exact/stemmed source-content selection:
 

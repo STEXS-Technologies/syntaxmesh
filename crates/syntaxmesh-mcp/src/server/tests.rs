@@ -352,6 +352,7 @@ fn tool_discovery_exposes_only_read_tools() {
             "context",
             "contract_history",
             "evaluate_contracts",
+            "explain_inference_claim",
             "inference_checkpoint",
             "inference_claims_page",
             "neighbors",

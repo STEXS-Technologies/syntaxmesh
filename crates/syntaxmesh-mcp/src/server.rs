@@ -17,7 +17,8 @@ use syntaxmesh_context_host::RepositorySourceReader;
 use syntaxmesh_core::{GenerationId, NodeId, RepositoryId, StableId, WorktreeId};
 use syntaxmesh_engine::SyntaxMeshEngine;
 use syntaxmesh_inference::{
-    Contract, ContractLimits, ContractOrigin, ContractOutcome, RelationExpectation,
+    Claim, Contract, ContractLimits, ContractOrigin, ContractOutcome, DerivationClass,
+    RelationExpectation, Rule,
 };
 use syntaxmesh_lang_rust::RustExtractor;
 use syntaxmesh_language_sdk::LanguageExtractor;
@@ -213,6 +214,22 @@ struct InferencePageArgs {
     tree_pages: u64,
     cursor: Option<InferenceCursorArgs>,
 }
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct ExplainInferenceClaimArgs {
+    /// Serialized `InferenceClaim` copied from `inference_claims_page`.
+    #[schemars(length(max = 131072))]
+    claim_json: String,
+    /// Serialized deterministic `Rule` from the operator's inference configuration.
+    #[schemars(length(max = 131072))]
+    rule_json: String,
+}
+
+const MAX_EXPLANATION_INPUT_BYTES: usize = 256 * 1024;
+const MAX_EXPLANATION_PREMISES: usize = 256;
+const MAX_EXPLANATION_DEPTH: usize = 64;
+const MAX_EXPLANATION_OUTPUT_BYTES: usize = 256 * 1024;
 
 #[derive(Clone)]
 struct ExactTiktokenCounter {
@@ -1114,6 +1131,46 @@ impl<E: LanguageExtractor + Send + 'static> SyntaxMeshMcp<E> {
     }
 
     #[tool(
+        description = "Verify one retained deterministic inference claim and return its bounded, exact premise and provenance evidence from the claim's graph generation. Supply the claim from inference_claims_page and its matching Rule JSON."
+    )]
+    async fn explain_inference_claim(
+        &self,
+        Parameters(args): Parameters<ExplainInferenceClaimArgs>,
+    ) -> Result<CallToolResult, McpError> {
+        let input_bytes = args
+            .claim_json
+            .len()
+            .checked_add(args.rule_json.len())
+            .ok_or_else(|| Self::tool_error("explanation input byte count overflow"))?;
+        if input_bytes > MAX_EXPLANATION_INPUT_BYTES {
+            return Err(Self::tool_error(
+                "claim and rule JSON exceed the explanation input byte budget",
+            ));
+        }
+        let claim: syntaxmesh_api_model::InferenceClaim = serde_json::from_str(&args.claim_json)
+            .map_err(|error| Self::tool_error(format!("invalid inference claim JSON: {error}")))?;
+        let rule: Rule = serde_json::from_str(&args.rule_json)
+            .map_err(|error| Self::tool_error(format!("invalid inference rule JSON: {error}")))?;
+        let claim = domain_claim(claim);
+        self.with_engine(move |engine| {
+            let explanation = engine
+                .query(claim.generation)
+                .explain_inference_claim(
+                    &claim,
+                    &rule,
+                    MAX_EXPLANATION_PREMISES,
+                    MAX_EXPLANATION_DEPTH,
+                    MAX_EXPLANATION_OUTPUT_BYTES,
+                )
+                .map_err(|error| error.to_string())?;
+            serde_json::to_value(explanation)
+                .map_err(|error| format!("encode verified inference explanation: {error}"))
+        })
+        .await
+        .and_then(|value| Self::result(&value))
+    }
+
+    #[tool(
         description = "Read a bounded page of already-retained contract evaluations from an operator-configured inference binding. This tool never evaluates or materializes contracts."
     )]
     async fn contract_history(
@@ -1279,6 +1336,40 @@ impl<E: LanguageExtractor + Send + 'static> SyntaxMeshMcp<E> {
             .await
             .and_then(|value| Self::result(&value))
         }
+    }
+}
+
+fn domain_claim(claim: syntaxmesh_api_model::InferenceClaim) -> Claim {
+    Claim {
+        id: claim.id,
+        derivation_class: match claim.derivation_class {
+            syntaxmesh_api_model::InferenceDerivationClass::DeterministicRule => {
+                DerivationClass::DeterministicRule
+            }
+            syntaxmesh_api_model::InferenceDerivationClass::HeuristicRule => {
+                DerivationClass::HeuristicRule
+            }
+            syntaxmesh_api_model::InferenceDerivationClass::ModelInference => {
+                DerivationClass::ModelInference
+            }
+            syntaxmesh_api_model::InferenceDerivationClass::UserDeclared => {
+                DerivationClass::UserDeclared
+            }
+            syntaxmesh_api_model::InferenceDerivationClass::RuntimeCorrelation => {
+                DerivationClass::RuntimeCorrelation
+            }
+        },
+        repository: claim.repository,
+        worktree: claim.worktree,
+        generation: claim.generation,
+        source: claim.source,
+        target: claim.target,
+        relation: claim.relation,
+        rule_id: claim.rule_id,
+        rule_version: claim.rule_version,
+        ontology_versions: claim.ontology_versions,
+        configuration_fingerprint: claim.configuration_fingerprint,
+        premises: claim.premises,
     }
 }
 

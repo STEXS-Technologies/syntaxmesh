@@ -1,11 +1,12 @@
 use super::super::{
-    ContractHistoryArgs, InferenceCheckpointArgs, InferenceCursorArgs, InferencePageArgs,
-    SyntaxMeshMcp,
+    ContractHistoryArgs, ExplainInferenceClaimArgs, InferenceCheckpointArgs, InferenceCursorArgs,
+    InferencePageArgs, SyntaxMeshMcp,
 };
 use super::{Fixture, content_json};
 use rmcp::handler::server::wrapper::Parameters;
 use syntaxmesh_api_model::{
-    INFERENCE_READ_SCHEMA_VERSION, InferenceCheckpointResponse, InferencePageResponse,
+    INFERENCE_READ_SCHEMA_VERSION, InferenceCheckpointResponse, InferenceExplanation,
+    InferencePageResponse,
 };
 use syntaxmesh_core::{
     Edge, EdgeId, EvidenceClass, GenerationId, GraphDelta, IndexRunId, Node, NodeId, NodeKind,
@@ -166,6 +167,32 @@ fn mcp_inference_tools_serve_retained_checkpoint_and_claim_page()
         )?;
     }
 
+    let later_generation = GenerationId::derive(&[b"mcp-retained-inference-later"]);
+    let mut later_store = TursoGraphStore::open(&canonical_database)?;
+    later_store.apply_delta(GraphDelta {
+        repository,
+        worktree,
+        run_id: IndexRunId::derive(&[b"mcp-retained-inference-later-run"]),
+        expected_base: Some(generation),
+        next_generation: later_generation,
+        changed_files: Vec::new(),
+        removed_files: Vec::new(),
+        upsert_provenance: Vec::new(),
+        upsert_nodes: vec![Node {
+            id: NodeId::derive(&[b"mcp-retained-inference-later-unrelated"]),
+            kind: NodeKind::Function,
+            name: "later unrelated node".to_owned(),
+            owner_file: None,
+            source: None,
+            provenance: provenance.id,
+            extension_payload: None,
+        }],
+        upsert_edges: Vec::new(),
+        remove_nodes: Vec::new(),
+        remove_edges: Vec::new(),
+    })?;
+    drop(later_store);
+
     let page_limits = syntaxmesh_api_model::InferencePageLimits {
         claims: 1,
         payload_bytes: 16_384,
@@ -313,6 +340,61 @@ fn mcp_inference_tools_serve_retained_checkpoint_and_claim_page()
         || first_page.claims.len() != 1
     {
         return Err("MCP first claim page did not preserve its continuation".into());
+    }
+    let first_claim = first_page
+        .claims
+        .first()
+        .ok_or("MCP first page omitted its claim")?;
+    let matching_rule = rules
+        .iter()
+        .find(|rule| rule.id == first_claim.rule_id)
+        .ok_or("MCP claim refers to an unconfigured rule")?;
+    let explanation_result = runtime.block_on(server.explain_inference_claim(Parameters(
+        ExplainInferenceClaimArgs {
+            claim_json: serde_json::to_string(first_claim)?,
+            rule_json: serde_json::to_string(matching_rule)?,
+        },
+    )))?;
+    let explanation: InferenceExplanation =
+        serde_json::from_value(content_json(&explanation_result)?)?;
+    if explanation.claim.id != first_claim.id
+        || explanation.selection.generation != generation
+        || explanation.selection.generation == later_generation
+        || explanation.premises.len() != first_claim.premises.len()
+        || explanation
+            .premises
+            .iter()
+            .zip(&first_claim.premises)
+            .any(|(evidence, reference)| {
+                evidence.reference != *reference
+                    || evidence.provenance.id != evidence.edge.provenance
+            })
+    {
+        return Err(
+            "MCP explanation did not verify the historical claim and exact evidence".into(),
+        );
+    }
+    let wrong_rule = rules
+        .iter()
+        .find(|rule| rule.id != matching_rule.id)
+        .ok_or("missing mismatched rule")?;
+    let wrong_rule = runtime.block_on(server.explain_inference_claim(Parameters(
+        ExplainInferenceClaimArgs {
+            claim_json: serde_json::to_string(first_claim)?,
+            rule_json: serde_json::to_string(wrong_rule)?,
+        },
+    )));
+    if wrong_rule.is_ok() {
+        return Err("MCP explanation accepted a mismatched rule definition".into());
+    }
+    let oversized = runtime.block_on(server.explain_inference_claim(Parameters(
+        ExplainInferenceClaimArgs {
+            claim_json: "x".repeat(256 * 1024),
+            rule_json: String::new(),
+        },
+    )));
+    if oversized.is_ok() {
+        return Err("MCP explanation accepted input beyond its byte budget".into());
     }
     let first_id = first_page
         .claims

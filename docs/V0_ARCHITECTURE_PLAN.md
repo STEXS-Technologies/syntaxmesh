@@ -237,7 +237,15 @@ the rule witness at the selected generation and returns its ordered exact
 premise versions, edges, and producer provenance (with source spans where
 available), subject to premise/depth/serialized-byte bounds. The API DTO remains
 storage independent. This is a direct proof witness, not a recursive derivation
-DAG or truth-maintenance state; CLI/MCP explanation delivery remains open.
+DAG or truth-maintenance state; CLI explanation delivery remains open.
+
+[ADR-0396](adr/0396-mcp-verified-claim-explanation.md) exposes the verified
+direct proof as a read-only MCP tool. A harness supplies a retained claim from
+the inference page and its matching Rule JSON; the host selects the claim's
+historical graph generation, verifies the witness, and returns the bounded
+premise/provenance bundle. MCP applies fixed input, premise, depth, and output
+caps. This closes the first native-harness explanation path, not recursive
+proof trees, natural-language `why`, or full v4 completion.
 
 [ADR-0378](adr/0378-mcp-generation-pinned-contract-evaluation.md) exposes the
 same read-only evaluation through a versioned MCP tool for any harness. It pins

@@ -1,6 +1,6 @@
 # SyntaxMesh v0 architecture and implementation plan
 
-Status: active implementation plan; last updated 2026-10-22. The two source-of-truth documents in this directory remain authoritative for product intent. This plan records implementation evidence and the remaining v0–v5 exit gates.
+Status: active implementation plan; last updated 2026-10-23. The two source-of-truth documents in this directory remain authoritative for product intent. This plan records implementation evidence and the remaining v0–v5 exit gates.
 
 ## 1. Scope and release distinction
 
@@ -230,6 +230,14 @@ present in a retained generation is cited by its exact opening version, while a
 later removal changes a forbidden contract from contradicted to insufficient
 evidence. Host delivery and durable contract-result history remain open; this
 is not complete v2 drift analysis.
+
+[ADR-0395](adr/0395-verified-inference-explanations.md) adds one bounded,
+versioned explanation result for a deterministic inference claim. Query verifies
+the rule witness at the selected generation and returns its ordered exact
+premise versions, edges, and producer provenance (with source spans where
+available), subject to premise/depth/serialized-byte bounds. The API DTO remains
+storage independent. This is a direct proof witness, not a recursive derivation
+DAG or truth-maintenance state; CLI/MCP explanation delivery remains open.
 
 [ADR-0378](adr/0378-mcp-generation-pinned-contract-evaluation.md) exposes the
 same read-only evaluation through a versioned MCP tool for any harness. It pins

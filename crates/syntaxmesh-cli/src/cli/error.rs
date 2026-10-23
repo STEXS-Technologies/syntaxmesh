@@ -23,6 +23,7 @@ pub(super) enum CliError {
     ModuleResolution(ModuleResolutionError),
     PythonModuleResolution(String),
     SemanticProvider(String),
+    #[cfg(feature = "inference-sqlite")]
     ContractPolicyFailed,
 }
 
@@ -47,6 +48,7 @@ impl std::fmt::Display for CliError {
                 write!(formatter, "Python module resolver setup failed: {error}")
             }
             Self::SemanticProvider(error) => write!(formatter, "semantic provider failed: {error}"),
+            #[cfg(feature = "inference-sqlite")]
             Self::ContractPolicyFailed => write!(formatter, "contract policy failed"),
         }
     }

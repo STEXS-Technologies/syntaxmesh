@@ -75,25 +75,25 @@ fn v7_to_v8_violation_index_migration_is_explicit_and_atomic() -> Result<()> {
         return Err("violation-history migration ledger failure was ignored".into());
     }
     let version: i64 = connection.query_row("PRAGMA user_version", [], |row| row.get(0))?;
-    let indexes: i64 = connection.query_row(
+    let indexes_after_rollback: i64 = connection.query_row(
         "SELECT COUNT(*) FROM sqlite_master WHERE type = 'index'
          AND name = 'inference_contract_violation_episodes_history'",
         [],
         |row| row.get(0),
     )?;
-    if version != 7 || indexes != 0 {
+    if version != 7 || indexes_after_rollback != 0 {
         return Err("failed violation-history migration left partial schema".into());
     }
     connection.execute_batch("DROP TRIGGER interrupt_violation_history")?;
     migrate(&path)?;
     let materializer = InferenceMaterializer::open(&path)?;
-    let indexes: i64 = materializer.connection.query_row(
+    let final_index_count: i64 = materializer.connection.query_row(
         "SELECT COUNT(*) FROM sqlite_master WHERE type = 'index'
          AND name = 'inference_contract_violation_episodes_history'",
         [],
         |row| row.get(0),
     )?;
-    if indexes != 1 {
+    if final_index_count != 1 {
         return Err("successful migration omitted violation-history index".into());
     }
     Ok(())

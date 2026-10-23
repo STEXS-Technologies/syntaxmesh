@@ -350,6 +350,35 @@ pub(super) fn verify<S: GraphStore>(
     let claim = historical.first().ok_or("missing retained claim")?;
     let witness = retained_query.inference_premises(claim, 10)?;
     retained_query.verify_inference_claim(claim, rule, 10, 2)?;
+    let explanation = retained_query.explain_inference_claim(claim, rule, 10, 2, 64 * 1024)?;
+    if explanation.schema_version != 1
+        || explanation.selection.generation != retained
+        || explanation.claim.id != claim.id
+        || explanation.premises.len() != claim.premises.len()
+        || explanation
+            .premises
+            .iter()
+            .zip(&claim.premises)
+            .any(|(evidence, reference)| {
+                evidence.reference != *reference
+                    || evidence.edge.id
+                        != match reference.fact {
+                            syntaxmesh_core::FactRef::Edge(edge) => edge,
+                            syntaxmesh_core::FactRef::File(_)
+                            | syntaxmesh_core::FactRef::Provenance(_)
+                            | syntaxmesh_core::FactRef::Node(_) => return true,
+                        }
+                    || evidence.provenance.id != evidence.edge.provenance
+            })
+    {
+        return Err("verified inference explanation lost its ordered claim evidence".into());
+    }
+    if retained_query
+        .explain_inference_claim(claim, rule, 10, 2, 1)
+        .is_ok()
+    {
+        return Err("inference explanation exceeded its serialized output bound".into());
+    }
     let mut altered = claim.clone();
     altered.id = StableId::derive("altered-claim", &[b"forged"]);
     if retained_query

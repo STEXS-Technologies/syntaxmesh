@@ -16,6 +16,28 @@ versioned-record round-trip, Query service, migration-registry, durable restart,
 and adapter suites pass. Broader v5 Stage D behavior-to-observation mapping
 remains open.
 
+### Full-repository context retrieval remains below the v0 gate (2026-10-23)
+
+A fresh default-context run over the approved Shardline checkout indexed 1,149
+tracked supported files (1,404 untracked supported files were excluded). Its
+single full-repository sample retrieved 5/7 fixed targets at 2,048 tokens and
+6/7 at 8,192; `load_metadata` was missed at both budgets, and the migration
+test target was missed at 2,048. Median context-query latency was 14.14 s and
+16.49 s, respectively, with individual queries ranging from 4.12 s to 124.46
+s. Fixture ingestion/publication took 24.24 minutes. The run used a temporary
+compound-symbol relevance experiment; it did not recover the Python target and
+was discarded. Raw evidence is retained under ignored
+`target/context-retrieval-results/`.
+
+The existing indexed-context host path was then checked on the selected Shardline
+fixture (five input files): it retrieved all 7/7 targets at both budgets. Its
+cold planner build processed 2,103 nodes and 16,689 postings in 255 ms; query
+medians were 0.88 s and 1.54 s. This is promising selected-file evidence only,
+not a full-repository quality/cost result. Indexed retrieval therefore remains
+opt-in. The next retrieval gate is a full-repository indexed-host run with cold
+build, retained-cache, target recall, and query latency recorded before any
+default change.
+
 ## 1. Scope and release distinction
 
 ### Context packer compaction retry (2026-10-22)

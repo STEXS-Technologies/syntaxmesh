@@ -1,12 +1,13 @@
 use std::ffi::OsString;
 use std::path::PathBuf;
 
-pub(super) const USAGE: &str = "usage: syntaxmesh-mcp <migrated-turso-database> <source-root> <cl100k_base|o200k_base> [--source-content-context] [--lexical-first-context]";
+pub(super) const USAGE: &str = "usage: syntaxmesh-mcp <migrated-turso-database> <source-root> <cl100k_base|o200k_base> [--indexed-context | --lexical-first-context] [--source-content-context]";
 
 pub(super) struct Options {
     pub(super) database: PathBuf,
     pub(super) source_root: PathBuf,
     pub(super) tokenizer: String,
+    pub(super) indexed_context: bool,
     pub(super) source_content: bool,
     pub(super) lexical_first: bool,
 }
@@ -23,10 +24,13 @@ pub(super) fn parse(arguments: impl IntoIterator<Item = OsString>) -> Result<Opt
     if !matches!(tokenizer.as_str(), "cl100k_base" | "o200k_base") {
         return Err("tokenizer must be cl100k_base or o200k_base".to_owned());
     }
+    let mut indexed_context = false;
     let mut source_content = false;
     let mut lexical_first = false;
     for argument in arguments {
-        if argument == "--source-content-context" && !source_content {
+        if argument == "--indexed-context" && !indexed_context {
+            indexed_context = true;
+        } else if argument == "--source-content-context" && !source_content {
             source_content = true;
         } else if argument == "--lexical-first-context" && !lexical_first {
             lexical_first = true;
@@ -34,10 +38,14 @@ pub(super) fn parse(arguments: impl IntoIterator<Item = OsString>) -> Result<Opt
             return Err(USAGE.to_owned());
         }
     }
+    if indexed_context && lexical_first {
+        return Err(USAGE.to_owned());
+    }
     Ok(Options {
         database,
         source_root,
         tokenizer,
+        indexed_context,
         source_content,
         lexical_first,
     })

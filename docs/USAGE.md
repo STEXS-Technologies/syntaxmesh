@@ -523,16 +523,26 @@ indexed exact/stemmed source-content selection:
 syntaxmesh-mcp graph.db /path/to/source cl100k_base --source-content-context
 ```
 
-Add `--lexical-first-context` to prioritize original lexical seeds before graph
-discoveries during indexed packing. It composes with `--source-content-context`;
-balanced packing remains default. This is an explicit ordering preference, not
-a guarantee of better retrieval for every query. Explicit seed IDs bypass it.
+Add `--indexed-context` to enable the generation-scoped indexed planner with
+balanced discovery and neutral source-role ordering. Add
+`--lexical-first-context` instead to prioritize original lexical seeds before
+graph discoveries during indexed packing; the two ordering policies are
+mutually exclusive. Both compose with `--source-content-context`. Indexed
+context remains opt-in because its cold planner build scans the selected
+generation and can take tens of seconds on a large repository; subsequent
+requests reuse the host's policy-scoped cache. Explicit seed IDs bypass indexed
+selection. Full-repository Shardline evidence is recorded in
+[ADR-0398](docs/adr/0398-explicit-indexed-context-mcp-option.md); it is not a
+cross-repository relevance or performance guarantee.
 
-This excludes reserved processing metadata from lexical candidates before limits,
-while raw search and explicit seed IDs retain their original behavior. Cold index
-construction scans the selected generation and can be expensive; subsequent
-requests reuse its policy-scoped cache. The default remains unchanged. This is
-not a whole-repository relevance or performance guarantee
+```sh
+syntaxmesh-mcp graph.db /path/to/source cl100k_base --indexed-context
+```
+
+In source-content mode, reserved processing metadata is excluded from lexical
+candidates before limits, while raw search and explicit seed IDs retain their
+original behavior. This source-content policy remains opt-in and is not a
+whole-repository relevance or performance guarantee
 ([ADR-0327](docs/adr/0327-source-content-retrieval-and-processing-evidence.md)).
 
 Embedded owners can instead construct `SyntaxMeshMcp::from_shared_engine` with

@@ -29,6 +29,10 @@ fn malformed_launch_options_fail_before_storage_access() -> Result<(), Box<dyn E
             "cl100k_base",
             vec!["--lexical-first-context", "--lexical-first-context"],
         ),
+        (
+            "cl100k_base",
+            vec!["--indexed-context", "--lexical-first-context"],
+        ),
     ] {
         let output = Command::new(env!("CARGO_BIN_EXE_syntaxmesh-mcp"))
             .arg(&database)
@@ -96,25 +100,37 @@ impl Drop for Fixture {
 
 #[test]
 fn stdio_initializes_lists_read_tools_and_executes_search() -> Result<(), Box<dyn Error>> {
-    exercise_stdio(false, false)
+    exercise_stdio(false, false, false)
 }
 
 #[test]
 fn stdio_source_content_selection_uses_existing_protocol() -> Result<(), Box<dyn Error>> {
-    exercise_stdio(true, false)
+    exercise_stdio(true, false, false)
 }
 
 #[test]
 fn stdio_composed_discovery_selection_uses_existing_protocol() -> Result<(), Box<dyn Error>> {
-    exercise_stdio(true, true)
+    exercise_stdio(true, true, false)
 }
 
-fn exercise_stdio(source_content: bool, lexical_first: bool) -> Result<(), Box<dyn Error>> {
+#[test]
+fn stdio_balanced_indexed_context_uses_existing_protocol() -> Result<(), Box<dyn Error>> {
+    exercise_stdio(false, false, true)
+}
+
+fn exercise_stdio(
+    source_content: bool,
+    lexical_first: bool,
+    indexed_context: bool,
+) -> Result<(), Box<dyn Error>> {
     let (fixture, database, generation, previous) = Fixture::indexed_database()?;
     let mut command = Command::new(env!("CARGO_BIN_EXE_syntaxmesh-mcp"));
     command.arg(database).arg(&fixture.0).arg("cl100k_base");
     if source_content {
         command.arg("--source-content-context");
+    }
+    if indexed_context {
+        command.arg("--indexed-context");
     }
     if lexical_first {
         command.arg("--lexical-first-context");
@@ -234,6 +250,7 @@ fn exercise_stdio(source_content: bool, lexical_first: bool) -> Result<(), Box<d
             "context",
             "contract_history",
             "evaluate_contracts",
+            "explain_inference_claim",
             "inference_checkpoint",
             "inference_claims_page",
             "neighbors",

@@ -13,7 +13,9 @@ fn main() -> Result<(), Box<dyn Error>> {
     if selected.source_content {
         server = server.with_source_content_context();
     }
-    if selected.lexical_first {
+    if selected.indexed_context {
+        server = server.with_indexed_context();
+    } else if selected.lexical_first {
         server = server.with_indexed_context_discovery_preference(
             syntaxmesh_query::DiscoveryPackingPreference::LexicalFirst,
         );

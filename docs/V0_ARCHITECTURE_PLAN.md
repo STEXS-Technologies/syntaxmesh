@@ -29,14 +29,19 @@ compound-symbol relevance experiment; it did not recover the Python target and
 was discarded. Raw evidence is retained under ignored
 `target/context-retrieval-results/`.
 
-The existing indexed-context host path was then checked on the selected Shardline
-fixture (five input files): it retrieved all 7/7 targets at both budgets. Its
-cold planner build processed 2,103 nodes and 16,689 postings in 255 ms; query
-medians were 0.88 s and 1.54 s. This is promising selected-file evidence only,
-not a full-repository quality/cost result. Indexed retrieval therefore remains
-opt-in. The next retrieval gate is a full-repository indexed-host run with cold
-build, retained-cache, target recall, and query latency recorded before any
-default change.
+The indexed-context host path was then checked over the same full Shardline
+scope: it retrieved all 7/7 targets at both budgets. The cold planner processed
+266,225 nodes and 2,742,828 postings, taking 49.88 s and charging 97 MB of
+planner payload; the first 2,048-token request took 50.80 s. Retained-cache
+query medians were 0.89 s and 1.84 s. Full fixture ingestion/publication took
+23.67 minutes and is separate from query-time planner construction. This is one
+fresh full-repository sample, not repeatable or cross-repository acceptance.
+[ADR-0398](adr/0398-explicit-indexed-context-mcp-option.md) exposes this tested
+balanced indexed mode as an explicit standalone MCP option while retaining the
+default and the existing lexical-first policy. Indexed retrieval remains
+opt-in: the next gate is repeated full-repository evidence across the three
+approved STEXS corpora, with cold memory/build cost and retained-cache behavior
+measured before any default change.
 
 ## 1. Scope and release distinction
 

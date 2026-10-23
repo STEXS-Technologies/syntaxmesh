@@ -23,6 +23,44 @@ fn content_selection_is_explicit_and_duplicate_flags_reject() -> Result<(), Stri
 }
 
 #[test]
+fn balanced_indexed_context_is_explicit_and_conflicts_with_lexical_first() -> Result<(), String> {
+    let base = ["graph.db", "source", "cl100k_base"];
+    let plain = super::parse(base.map(std::ffi::OsString::from))?;
+    let indexed = super::parse(
+        base.into_iter()
+            .chain(["--indexed-context"])
+            .map(std::ffi::OsString::from),
+    )?;
+    if plain.indexed_context || !indexed.indexed_context {
+        return Err("balanced indexed context became implicit or was ignored".to_owned());
+    }
+    let indexed_with_content = super::parse(
+        base.into_iter()
+            .chain(["--indexed-context", "--source-content-context"])
+            .map(std::ffi::OsString::from),
+    )?;
+    if !indexed_with_content.indexed_context || !indexed_with_content.source_content {
+        return Err("balanced indexed and source-content policies did not compose".to_owned());
+    }
+    if super::parse(
+        base.into_iter()
+            .chain(["--indexed-context", "--indexed-context"])
+            .map(std::ffi::OsString::from),
+    )
+    .is_ok()
+        || super::parse(
+            base.into_iter()
+                .chain(["--indexed-context", "--lexical-first-context"])
+                .map(std::ffi::OsString::from),
+        )
+        .is_ok()
+    {
+        return Err("duplicate or conflicting indexed policy was accepted".to_owned());
+    }
+    Ok(())
+}
+
+#[test]
 fn discovery_flags_compose_in_either_order_without_implicit_defaults() -> Result<(), String> {
     let base = ["graph.db", "source", "cl100k_base"];
     if super::parse(base.map(std::ffi::OsString::from))?.lexical_first {
